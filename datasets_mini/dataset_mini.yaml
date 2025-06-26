@@ -1,6 +1,6 @@
 # 安全帽检测mini数据集配置 (仅用于快速测试)
-train: datasets_mini/train/images
-val: datasets_mini/val/images
+train: train/images
+val: val/images
 
 # 类别数量
 nc: 3
