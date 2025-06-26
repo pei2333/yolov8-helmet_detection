@@ -18,7 +18,7 @@ from .conv import Conv, DWConv
 from .transformer import MLP, DeformableTransformerDecoder, DeformableTransformerDecoderLayer
 from .utils import bias_init_with_prob, linear_init
 
-__all__ = "Detect", "Segment", "Pose", "Classify", "OBB", "RTDETRDecoder", "v10Detect", "YOLOEDetect", "YOLOESegment"
+__all__ = "Detect", "Segment", "Pose", "Classify", "OBB", "RTDETRDecoder", "v10Detect", "YOLOEDetect", "YOLOESegment", "PSCDetect"
 
 
 class Detect(nn.Module):
@@ -1226,3 +1226,209 @@ class v10Detect(Detect):
     def fuse(self):
         """Remove the one2many head for inference optimization."""
         self.cv2 = self.cv3 = nn.ModuleList([nn.Identity()] * self.nl)
+
+
+class PSCDetect(Detect):
+    """
+    PSC-Head (Parameter Shared Convolution Head) 检测头
+    
+    通过参数共享的卷积层来减少检测头部分的参数冗余，提升检测效率和推理速度，
+    同时保持检测性能。虽然卷积层参数共享，但BatchNorm层保持独立，以避免不同尺度
+    特征在规范化过程中产生滑动平均偏差。
+    
+    Attributes:
+        shared_conv_reg (nn.ModuleList): 共享的回归卷积层
+        shared_conv_cls (nn.ModuleList): 共享的分类卷积层
+        bn_reg (nn.ModuleList): 独立的回归BatchNorm层
+        bn_cls (nn.ModuleList): 独立的分类BatchNorm层
+    """
+    
+    def __init__(self, nc: int = 80, ch: Tuple = ()):
+        """
+        初始化PSC检测头
+        
+        Args:
+            nc (int): 类别数量
+            ch (tuple): 来自backbone的通道尺寸元组
+        """
+        super().__init__(nc, ch)
+        
+        # 重新定义共享的卷积层
+        c2, c3 = max((16, ch[0] // 4, self.reg_max * 4)), max(ch[0], min(self.nc, 100))
+        
+        # 共享的回归分支卷积层（不包含BatchNorm）
+        self.shared_conv_reg = nn.ModuleList([
+            nn.Conv2d(ch[0], c2, 3, 1, 1, bias=False),  # 第一层
+            nn.Conv2d(c2, c2, 3, 1, 1, bias=False),     # 第二层
+            nn.Conv2d(c2, 4 * self.reg_max, 1, bias=True)  # 输出层
+        ])
+        
+        # 共享的分类分支卷积层（不包含BatchNorm）
+        if self.legacy:
+            self.shared_conv_cls = nn.ModuleList([
+                nn.Conv2d(ch[0], c3, 3, 1, 1, bias=False),  # 第一层
+                nn.Conv2d(c3, c3, 3, 1, 1, bias=False),     # 第二层
+                nn.Conv2d(c3, self.nc, 1, bias=True)        # 输出层
+            ])
+        else:
+            # 使用DWConv的版本
+            self.shared_conv_cls = nn.ModuleList([
+                nn.Conv2d(ch[0], ch[0], 3, 1, 1, groups=ch[0], bias=False),  # DWConv
+                nn.Conv2d(ch[0], c3, 1, bias=False),                         # 1x1 Conv
+                nn.Conv2d(c3, c3, 3, 1, 1, groups=c3, bias=False),          # DWConv
+                nn.Conv2d(c3, c3, 1, bias=False),                            # 1x1 Conv
+                nn.Conv2d(c3, self.nc, 1, bias=True)                         # 输出层
+            ])
+        
+        # 为每个尺度独立的BatchNorm层 - 回归分支
+        self.bn_reg = nn.ModuleList([
+            nn.ModuleList([
+                nn.BatchNorm2d(c2),         # 第一层BN
+                nn.BatchNorm2d(c2),         # 第二层BN
+            ]) for _ in range(self.nl)  # 为每个检测层创建独立的BN
+        ])
+        
+        # 为每个尺度独立的BatchNorm层 - 分类分支
+        if self.legacy:
+            self.bn_cls = nn.ModuleList([
+                nn.ModuleList([
+                    nn.BatchNorm2d(c3),         # 第一层BN
+                    nn.BatchNorm2d(c3),         # 第二层BN
+                ]) for _ in range(self.nl)
+            ])
+        else:
+            self.bn_cls = nn.ModuleList([
+                nn.ModuleList([
+                    nn.BatchNorm2d(ch[0]),      # DWConv BN
+                    nn.BatchNorm2d(c3),         # 1x1 Conv BN
+                    nn.BatchNorm2d(c3),         # DWConv BN
+                    nn.BatchNorm2d(c3),         # 1x1 Conv BN
+                ]) for _ in range(self.nl)
+            ])
+        
+        # 激活函数
+        self.act = nn.SiLU()
+        
+        # 重写原来的cv2和cv3，使其为空（因为我们使用共享层）
+        self.cv2 = nn.ModuleList()
+        self.cv3 = nn.ModuleList()
+        
+        # 如果是end2end模式，也需要处理one2one分支
+        if self.end2end:
+            import copy
+            self.one2one_shared_conv_reg = copy.deepcopy(self.shared_conv_reg)
+            self.one2one_shared_conv_cls = copy.deepcopy(self.shared_conv_cls)
+            self.one2one_bn_reg = copy.deepcopy(self.bn_reg)
+            self.one2one_bn_cls = copy.deepcopy(self.bn_cls)
+            
+    def forward_single_scale(self, x: torch.Tensor, scale_idx: int, use_one2one: bool = False) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        单尺度特征图的前向传播
+        
+        Args:
+            x (torch.Tensor): 输入特征图 [B, C, H, W]
+            scale_idx (int): 尺度索引 (0, 1, 2 对应 P3, P4, P5)
+            use_one2one (bool): 是否使用one2one分支
+            
+        Returns:
+            Tuple[torch.Tensor, torch.Tensor]: 回归输出和分类输出
+        """
+        # 选择使用的卷积层和BN层
+        if use_one2one and self.end2end:
+            conv_reg = self.one2one_shared_conv_reg
+            conv_cls = self.one2one_shared_conv_cls
+            bn_reg = self.one2one_bn_reg[scale_idx]
+            bn_cls = self.one2one_bn_cls[scale_idx]
+        else:
+            conv_reg = self.shared_conv_reg
+            conv_cls = self.shared_conv_cls
+            bn_reg = self.bn_reg[scale_idx]
+            bn_cls = self.bn_cls[scale_idx]
+        
+        # 回归分支
+        reg_out = x
+        reg_out = self.act(bn_reg[0](conv_reg[0](reg_out)))  # 第一层：Conv + BN + Act
+        reg_out = self.act(bn_reg[1](conv_reg[1](reg_out)))  # 第二层：Conv + BN + Act
+        reg_out = conv_reg[2](reg_out)                       # 输出层：Conv (no BN, no Act)
+        
+        # 分类分支
+        cls_out = x
+        if self.legacy:
+            cls_out = self.act(bn_cls[0](conv_cls[0](cls_out)))  # 第一层：Conv + BN + Act
+            cls_out = self.act(bn_cls[1](conv_cls[1](cls_out)))  # 第二层：Conv + BN + Act
+            cls_out = conv_cls[2](cls_out)                       # 输出层：Conv (no BN, no Act)
+        else:
+            # DWConv版本
+            cls_out = self.act(bn_cls[0](conv_cls[0](cls_out)))  # DWConv + BN + Act
+            cls_out = self.act(bn_cls[1](conv_cls[1](cls_out)))  # 1x1 Conv + BN + Act
+            cls_out = self.act(bn_cls[2](conv_cls[2](cls_out)))  # DWConv + BN + Act
+            cls_out = self.act(bn_cls[3](conv_cls[3](cls_out)))  # 1x1 Conv + BN + Act
+            cls_out = conv_cls[4](cls_out)                       # 输出层：Conv (no BN, no Act)
+        
+        return reg_out, cls_out
+    
+    def forward(self, x: List[torch.Tensor]) -> Union[List[torch.Tensor], Tuple]:
+        """前向传播，处理多尺度特征图"""
+        if self.end2end:
+            return self.forward_end2end(x)
+            
+        # 处理每个尺度的特征图
+        outputs = []
+        for i, xi in enumerate(x):
+            reg_out, cls_out = self.forward_single_scale(xi, i, use_one2one=False)
+            outputs.append(torch.cat([reg_out, cls_out], 1))
+        
+        if self.training:
+            return outputs
+            
+        y = self._inference(outputs)
+        return y if self.export else (y, outputs)
+    
+    def forward_end2end(self, x: List[torch.Tensor]) -> Union[dict, Tuple]:
+        """End-to-end前向传播"""
+        # Detach for one2one branch
+        x_detach = [xi.detach() for xi in x]
+        
+        # One2one branch
+        one2one = []
+        for i, xi in enumerate(x_detach):
+            reg_out, cls_out = self.forward_single_scale(xi, i, use_one2one=True)
+            one2one.append(torch.cat([reg_out, cls_out], 1))
+        
+        # One2many branch
+        one2many = []
+        for i, xi in enumerate(x):
+            reg_out, cls_out = self.forward_single_scale(xi, i, use_one2one=False)
+            one2many.append(torch.cat([reg_out, cls_out], 1))
+        
+        if self.training:
+            return {"one2many": one2many, "one2one": one2one}
+        
+        y = self._inference(one2one)
+        y = self.postprocess(y.permute(0, 2, 1), self.max_det, self.nc)
+        return y if self.export else (y, {"one2many": one2many, "one2one": one2one})
+    
+    def bias_init(self):
+        """初始化检测头的偏置"""
+        # 初始化回归分支最后一层的偏置
+        self.shared_conv_reg[-1].bias.data[:] = 1.0
+        
+        # 初始化分类分支最后一层的偏置
+        if self.legacy:
+            cls_final_layer = self.shared_conv_cls[-1]
+        else:
+            cls_final_layer = self.shared_conv_cls[-1]
+        
+        for s in self.stride:
+            cls_final_layer.bias.data[:self.nc] = math.log(5 / self.nc / (640 / s) ** 2)
+        
+        # 如果有end2end分支，也需要初始化
+        if self.end2end:
+            self.one2one_shared_conv_reg[-1].bias.data[:] = 1.0
+            if self.legacy:
+                one2one_cls_final = self.one2one_shared_conv_cls[-1]
+            else:
+                one2one_cls_final = self.one2one_shared_conv_cls[-1]
+            
+            for s in self.stride:
+                one2one_cls_final.bias.data[:self.nc] = math.log(5 / self.nc / (640 / s) ** 2)

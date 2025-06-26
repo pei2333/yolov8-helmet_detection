@@ -191,6 +191,140 @@ class KeypointLoss(nn.Module):
         return (kpt_loss_factor.view(-1, 1) * ((1 - torch.exp(-e)) * kpt_mask)).mean()
 
 
+class SIoUBboxLoss(BboxLoss):
+    """
+    使用SIoU (Shape-aware IoU) 损失的边界框损失类
+    
+    SIoU损失改进了传统IoU（如CIoU、GIoU等）忽略方向信息的问题，
+    通过考虑边界框的形状和角度信息，更准确地对长条形或倾斜目标进行定位。
+    特别适用于无人机视角中目标常出现的非正交方向、斜视角现象。
+    """
+    
+    def __init__(self, reg_max: int = 16):
+        """初始化SIoU边界框损失模块"""
+        super().__init__(reg_max)
+        
+    def forward(
+        self,
+        pred_dist: torch.Tensor,
+        pred_bboxes: torch.Tensor,
+        anchor_points: torch.Tensor,
+        target_bboxes: torch.Tensor,
+        target_scores: torch.Tensor,
+        target_scores_sum: torch.Tensor,
+        fg_mask: torch.Tensor,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """计算SIoU和DFL损失"""
+        weight = target_scores.sum(-1)[fg_mask].unsqueeze(-1)
+        
+        # 使用SIoU而不是CIoU
+        siou = siou_loss(pred_bboxes[fg_mask], target_bboxes[fg_mask])
+        loss_iou = ((1.0 - siou) * weight).sum() / target_scores_sum
+        
+        # DFL损失保持不变
+        if self.dfl_loss:
+            target_ltrb = bbox2dist(anchor_points, target_bboxes, self.dfl_loss.reg_max - 1)
+            loss_dfl = self.dfl_loss(pred_dist[fg_mask].view(-1, self.dfl_loss.reg_max), target_ltrb[fg_mask]) * weight
+            loss_dfl = loss_dfl.sum() / target_scores_sum
+        else:
+            loss_dfl = torch.tensor(0.0).to(pred_dist.device)
+            
+        return loss_iou, loss_dfl
+
+
+def siou_loss(pred_boxes: torch.Tensor, target_boxes: torch.Tensor, eps: float = 1e-7) -> torch.Tensor:
+    """
+    计算SIoU (Shape-aware IoU) 损失
+    
+    SIoU损失包含四个部分：
+    1. Angle Cost: 考虑预测框和真实框之间的角度差异
+    2. Distance Cost: 考虑中心点之间的距离
+    3. Shape Cost: 考虑宽高比的差异
+    4. IoU Cost: 传统的IoU损失
+    
+    Args:
+        pred_boxes (torch.Tensor): 预测边界框 [N, 4] (x1, y1, x2, y2)
+        target_boxes (torch.Tensor): 目标边界框 [N, 4] (x1, y1, x2, y2)
+        eps (float): 小常数，避免除零
+        
+    Returns:
+        torch.Tensor: SIoU损失值 [N]
+    """
+    # 确保输入格式正确
+    pred_boxes = pred_boxes.float()
+    target_boxes = target_boxes.float()
+    
+    # 计算中心点坐标和宽高
+    pred_center_x = (pred_boxes[:, 0] + pred_boxes[:, 2]) / 2
+    pred_center_y = (pred_boxes[:, 1] + pred_boxes[:, 3]) / 2
+    pred_w = pred_boxes[:, 2] - pred_boxes[:, 0]
+    pred_h = pred_boxes[:, 3] - pred_boxes[:, 1]
+    
+    target_center_x = (target_boxes[:, 0] + target_boxes[:, 2]) / 2
+    target_center_y = (target_boxes[:, 1] + target_boxes[:, 3]) / 2
+    target_w = target_boxes[:, 2] - target_boxes[:, 0]
+    target_h = target_boxes[:, 3] - target_boxes[:, 1]
+    
+    # 计算传统IoU
+    # 交集
+    inter_x1 = torch.max(pred_boxes[:, 0], target_boxes[:, 0])
+    inter_y1 = torch.max(pred_boxes[:, 1], target_boxes[:, 1])
+    inter_x2 = torch.min(pred_boxes[:, 2], target_boxes[:, 2])
+    inter_y2 = torch.min(pred_boxes[:, 3], target_boxes[:, 3])
+    
+    inter_area = torch.clamp(inter_x2 - inter_x1, min=0) * torch.clamp(inter_y2 - inter_y1, min=0)
+    
+    # 并集
+    pred_area = pred_w * pred_h
+    target_area = target_w * target_h
+    union_area = pred_area + target_area - inter_area + eps
+    
+    iou = inter_area / union_area
+    
+    # 1. Angle Cost
+    # 计算中心点连线与坐标轴的角度
+    center_dx = target_center_x - pred_center_x
+    center_dy = target_center_y - pred_center_y
+    center_distance = torch.sqrt(center_dx ** 2 + center_dy ** 2) + eps
+    
+    # 计算最小外接矩形
+    enclose_x1 = torch.min(pred_boxes[:, 0], target_boxes[:, 0])
+    enclose_y1 = torch.min(pred_boxes[:, 1], target_boxes[:, 1])
+    enclose_x2 = torch.max(pred_boxes[:, 2], target_boxes[:, 2])
+    enclose_y2 = torch.max(pred_boxes[:, 3], target_boxes[:, 3])
+    enclose_w = enclose_x2 - enclose_x1 + eps
+    enclose_h = enclose_y2 - enclose_y1 + eps
+    
+    # 角度损失
+    angle_cost = 1 - 2 * torch.pow(torch.sin(torch.arcsin(torch.abs(center_dx) / center_distance) - torch.pi / 4), 2)
+    
+    # 2. Distance Cost
+    # 归一化的中心点距离
+    distance_cost = 2 - 2 * torch.exp(-center_distance / torch.sqrt(enclose_w ** 2 + enclose_h ** 2))
+    
+    # 3. Shape Cost  
+    # 宽高比损失
+    wh_ratio_pred = pred_w / (pred_h + eps)
+    wh_ratio_target = target_w / (target_h + eps)
+    
+    wh_ratio_loss = torch.pow(1 - torch.exp(-torch.abs(wh_ratio_pred - wh_ratio_target)), 0.6)
+    
+    # 形状损失，考虑宽高差异
+    w_loss = torch.abs(pred_w - target_w) / torch.max(pred_w, target_w)
+    h_loss = torch.abs(pred_h - target_h) / torch.max(pred_h, target_h)
+    shape_cost = torch.pow(1 - torch.exp(-w_loss), 0.9) + torch.pow(1 - torch.exp(-h_loss), 0.9)
+    
+    # 4. 综合SIoU损失
+    # 权重参数
+    alpha = 1.0  # angle cost权重
+    beta = 1.0   # distance cost权重  
+    gamma = 0.5  # shape cost权重
+    
+    siou = iou - alpha * angle_cost - beta * distance_cost - gamma * (wh_ratio_loss + shape_cost)
+    
+    return torch.clamp(siou, min=-1.0, max=1.0)
+
+
 class v8DetectionLoss:
     """Criterion class for computing training losses for YOLOv8 object detection."""
 
@@ -213,6 +347,102 @@ class v8DetectionLoss:
         self.assigner = TaskAlignedAssigner(topk=tal_topk, num_classes=self.nc, alpha=0.5, beta=6.0)
         self.bbox_loss = BboxLoss(m.reg_max).to(device)
         self.proj = torch.arange(m.reg_max, dtype=torch.float, device=device)
+
+    def preprocess(self, targets: torch.Tensor, batch_size: int, scale_tensor: torch.Tensor) -> torch.Tensor:
+        """Preprocess targets by converting to tensor format and scaling coordinates."""
+        nl, ne = targets.shape
+        if nl == 0:
+            out = torch.zeros(batch_size, 0, ne - 1, device=self.device)
+        else:
+            i = targets[:, 0]  # image index
+            _, counts = i.unique(return_counts=True)
+            counts = counts.to(dtype=torch.int32)
+            out = torch.zeros(batch_size, counts.max(), ne - 1, device=self.device)
+            for j in range(batch_size):
+                matches = i == j
+                if n := matches.sum():
+                    out[j, :n] = targets[matches, 1:]
+            out[..., 1:5] = xywh2xyxy(out[..., 1:5].mul_(scale_tensor))
+        return out
+
+    def bbox_decode(self, anchor_points: torch.Tensor, pred_dist: torch.Tensor) -> torch.Tensor:
+        """Decode predicted object bounding box coordinates from anchor points and distribution."""
+        if self.use_dfl:
+            b, a, c = pred_dist.shape  # batch, anchors, channels
+            pred_dist = pred_dist.view(b, a, 4, c // 4).softmax(3).matmul(self.proj.type(pred_dist.dtype))
+        return dist2bbox(pred_dist, anchor_points, xywh=False)
+
+    def __call__(self, preds: Any, batch: Dict[str, torch.Tensor]) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Calculate the sum of the loss for box, cls and dfl multiplied by batch size."""
+        loss = torch.zeros(3, device=self.device)  # box, cls, dfl
+        feats = preds[1] if isinstance(preds, tuple) else preds
+        pred_distri, pred_scores = torch.cat([xi.view(feats[0].shape[0], self.no, -1) for xi in feats], 2).split(
+            (self.reg_max * 4, self.nc), 1
+        )
+
+        pred_scores = pred_scores.permute(0, 2, 1).contiguous()
+        pred_distri = pred_distri.permute(0, 2, 1).contiguous()
+
+        dtype = pred_scores.dtype
+        batch_size = pred_scores.shape[0]
+        imgsz = torch.tensor(feats[0].shape[2:], device=self.device, dtype=dtype) * self.stride[0]  # image size (h,w)
+        anchor_points, stride_tensor = make_anchors(feats, self.stride, 0.5)
+
+        # Targets
+        targets = torch.cat((batch["batch_idx"].view(-1, 1), batch["cls"].view(-1, 1), batch["bboxes"]), 1)
+        targets = self.preprocess(targets.to(self.device), batch_size, scale_tensor=imgsz[[1, 0, 1, 0]])
+        gt_labels, gt_bboxes = targets.split((1, 4), 2)  # cls, xyxy
+        mask_gt = gt_bboxes.sum(2, keepdim=True).gt_(0.0)
+
+        # Pboxes
+        pred_bboxes = self.bbox_decode(anchor_points, pred_distri)  # xyxy, (b, h*w, 4)
+
+        _, target_bboxes, target_scores, fg_mask, _ = self.assigner(
+            pred_scores.detach().sigmoid(),
+            (pred_bboxes.detach() * stride_tensor).type(gt_bboxes.dtype),
+            anchor_points * stride_tensor,
+            gt_labels,
+            gt_bboxes,
+            mask_gt,
+        )
+
+        target_scores_sum = max(target_scores.sum(), 1)
+
+        # Cls loss
+        loss[1] = self.bce(pred_scores, target_scores.to(dtype)).sum() / target_scores_sum  # BCE
+
+        # Bbox loss
+        if fg_mask.sum():
+            target_bboxes /= stride_tensor
+            loss[0], loss[2] = self.bbox_loss(
+                pred_distri, pred_bboxes, anchor_points, target_bboxes, target_scores, target_scores_sum, fg_mask
+            )
+
+        loss[0] *= self.hyp.box  # box gain
+        loss[1] *= self.hyp.cls  # cls gain
+        loss[2] *= self.hyp.dfl  # dfl gain
+
+        return loss * batch_size, loss.detach()  # loss(box, cls, dfl)
+
+
+class v8DetectionSIoULoss(v8DetectionLoss):
+    """
+    使用SIoU损失的YOLOv8检测损失类
+    
+    将原来的CIoU损失替换为SIoU损失，以更好地处理具有方向性和形状变化的目标，
+    特别适合无人机视角下的安全帽检测任务。
+    """
+    
+    def __init__(self, model, tal_topk: int = 10):
+        """初始化使用SIoU损失的v8检测损失"""
+        # 先调用父类初始化
+        super().__init__(model, tal_topk)
+        
+        # 然后替换为SIoU边界框损失
+        self.bbox_loss = SIoUBboxLoss(self.reg_max).to(self.device)
+        
+        # Loss类型标识
+        self.loss_type = "SIoU"
 
     def preprocess(self, targets: torch.Tensor, batch_size: int, scale_tensor: torch.Tensor) -> torch.Tensor:
         """Preprocess targets by converting to tensor format and scaling coordinates."""

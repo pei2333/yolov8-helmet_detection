@@ -1,0 +1,47 @@
+# Ultralytics LW-YOLOv8 轻量级安全帽检测模型配置文件
+# 基于YOLOv8改进，集成CSP-CTFN模块和PSC-Head，使用SIoU损失函数
+# 专为无人机视角下的安全帽佩戴检测任务优化设计
+
+# 模型参数  
+nc: 3  # 类别数量 (person=0, helmet=1, no_helmet=2)
+scales: # 模型复合缩放常数
+  # [depth, width, max_channels]
+  n: [0.33, 0.25, 1024] # LW-YOLOv8n summary: 优化后的轻量级版本
+  s: [0.33, 0.50, 1024] # LW-YOLOv8s summary: 标准轻量级版本 
+  m: [0.67, 0.75, 768]  # LW-YOLOv8m summary: 中等轻量级版本
+  l: [1.00, 1.00, 512]  # LW-YOLOv8l summary: 大型轻量级版本
+  x: [1.00, 1.25, 512]  # LW-YOLOv8x summary: 超大轻量级版本
+
+# LW-YOLOv8 骨干网络 (使用CSP-CTFN模块替换部分C2f)
+backbone:
+  # [from, repeats, module, args]
+  - [-1, 1, Conv, [64, 3, 2]]     # 0-P1/2
+  - [-1, 1, Conv, [128, 3, 2]]    # 1-P2/4  
+  - [-1, 3, C2f, [128, True]]     # 2 - 保持原始C2f，浅层特征提取
+  - [-1, 1, Conv, [256, 3, 2]]    # 3-P3/8
+  - [-1, 6, CSP_CTFN, [256, True]] # 4 - 使用CSP-CTFN替换C2f，融合CNN和Transformer
+  - [-1, 1, Conv, [512, 3, 2]]    # 5-P4/16
+  - [-1, 6, CSP_CTFN, [512, True]] # 6 - 使用CSP-CTFN，增强特征表达
+  - [-1, 1, Conv, [1024, 3, 2]]   # 7-P5/32
+  - [-1, 3, CSP_CTFN, [1024, True]] # 8 - 深层使用CSP-CTFN，扩大感受野
+  - [-1, 1, SPPF, [1024, 5]]      # 9 - 空间金字塔池化
+
+# LW-YOLOv8 检测头 (使用PSC-Head参数共享)
+head:
+  - [-1, 1, nn.Upsample, [None, 2, "nearest"]]  # 10
+  - [[-1, 6], 1, Concat, [1]]     # 11 - cat backbone P4
+  - [-1, 3, C2f, [512]]           # 12
+
+  - [-1, 1, nn.Upsample, [None, 2, "nearest"]]  # 13  
+  - [[-1, 4], 1, Concat, [1]]     # 14 - cat backbone P3
+  - [-1, 3, C2f, [256]]           # 15 (P3/8-small)
+
+  - [-1, 1, Conv, [256, 3, 2]]    # 16
+  - [[-1, 12], 1, Concat, [1]]    # 17 - cat head P4
+  - [-1, 3, C2f, [512]]           # 18 (P4/16-medium)
+
+  - [-1, 1, Conv, [512, 3, 2]]    # 19
+  - [[-1, 9], 1, Concat, [1]]     # 20 - cat head P5  
+  - [-1, 3, C2f, [1024]]          # 21 (P5/32-large)
+
+  - [[15, 18, 21], 1, PSCDetect, [nc]]  # 22 - 使用PSC-Head参数共享检测头 

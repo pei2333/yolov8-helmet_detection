@@ -52,6 +52,9 @@ __all__ = (
     "PSA",
     "SCDown",
     "TorchVision",
+    "CSP_CTFN",
+    "MultiHeadSelfAttention",
+    "ConvGLU",
 )
 
 
@@ -2031,3 +2034,171 @@ class SAVPE(nn.Module):
         aggregated = score.transpose(-2, -3) @ x.reshape(B, self.c, C // self.c, -1).transpose(-1, -2)
 
         return F.normalize(aggregated.transpose(-2, -3).reshape(B, Q, -1), dim=-1, p=2)
+
+
+class CSP_CTFN(nn.Module):
+    """
+    CSP-CTFN (Cross Stage Partial Convolutional Neural Network Transformer Fusion Net) 模块
+    
+    融合卷积神经网络（CNN）的局部特征提取能力和多头自注意力机制（MHSA）的全局特征捕捉能力，
+    旨在扩大感受野，捕捉全局上下文信息，同时减少计算复杂度和参数量。
+    
+    Args:
+        c1 (int): 输入通道数
+        c2 (int): 输出通道数
+        n (int): 重复次数，默认为1
+        shortcut (bool): 是否使用残差连接，默认为True
+        g (int): 分组卷积的组数，默认为1
+        e (float): 通道扩展比例，默认为0.5
+        layer_scale (float): 层级缩放因子，默认为1e-6
+    """
+    
+    def __init__(self, c1: int, c2: int, n: int = 1, shortcut: bool = True, g: int = 1, e: float = 0.5, layer_scale: float = 1e-6):
+        super().__init__()
+        self.c = int(c2 * e)  # 隐藏通道数
+        self.cv1 = Conv(c1, 2 * self.c, 1, 1)  # 输入投影
+        self.cv2 = Conv(2 * self.c, c2, 1)     # 输出投影
+        
+        # 根据特征图层级调整CNN和Transformer的比例
+        # 浅层大尺寸特征图减少Transformer部分，深层小尺寸特征图增加Transformer比例
+        self.cnn_ratio = 0.7 if c1 <= 256 else 0.5  # 根据输入通道数调整比例
+        self.transformer_ratio = 1 - self.cnn_ratio
+        
+        self.cnn_channels = int(self.c * self.cnn_ratio)
+        self.transformer_channels = self.c - self.cnn_channels
+        
+        # CNN分支 - 使用传统卷积处理
+        self.cnn_blocks = nn.ModuleList([
+            Conv(self.cnn_channels, self.cnn_channels, 3, 1, g=g) for _ in range(n)
+        ])
+        
+        # Transformer分支 - 多头自注意力机制
+        if self.transformer_channels > 0:
+            self.mhsa = MultiHeadSelfAttention(self.transformer_channels, num_heads=8, dropout=0.0)
+            self.norm1 = nn.LayerNorm(self.transformer_channels)
+            self.norm2 = nn.LayerNorm(self.transformer_channels)
+            
+            # 卷积门控线性单元 (CGLU)
+            self.cglu = ConvGLU(self.transformer_channels, self.transformer_channels * 4)
+            
+            # 层级缩放
+            self.layer_scale1 = nn.Parameter(layer_scale * torch.ones(self.transformer_channels), requires_grad=True)
+            self.layer_scale2 = nn.Parameter(layer_scale * torch.ones(self.transformer_channels), requires_grad=True)
+        
+        self.add = shortcut and c1 == c2
+        
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """前向传播"""
+        if self.transformer_channels == 0:
+            # 如果没有Transformer通道，只使用CNN
+            y = self.cv1(x)
+            for block in self.cnn_blocks:
+                y = block(y)
+            return self.cv2(y) + x if self.add else self.cv2(y)
+        
+        # 输入投影并分割通道
+        y = self.cv1(x)  # [B, 2*c, H, W]
+        
+        # 分割为CNN和Transformer两部分
+        y_cnn = y[:, :self.cnn_channels]      # CNN部分 [B, cnn_c, H, W]
+        y_transformer = y[:, self.cnn_channels:self.cnn_channels + self.transformer_channels]  # Transformer部分 [B, trans_c, H, W]
+        
+        # CNN分支处理
+        for block in self.cnn_blocks:
+            y_cnn = block(y_cnn)
+        
+        # Transformer分支处理
+        B, C, H, W = y_transformer.shape
+        # 重塑为序列形式：[B, H*W, C]
+        y_trans_seq = y_transformer.flatten(2).transpose(1, 2)
+        
+        # 多头自注意力
+        y_trans_attn = self.mhsa(self.norm1(y_trans_seq))
+        y_trans_seq = y_trans_seq + self.layer_scale1.unsqueeze(0).unsqueeze(0) * y_trans_attn
+        
+        # 卷积门控线性单元
+        y_trans_cglu = self.cglu(y_trans_seq.transpose(1, 2).view(B, C, H, W))
+        y_trans_seq_cglu = y_trans_cglu.flatten(2).transpose(1, 2)
+        y_trans_seq = y_trans_seq + self.layer_scale2.unsqueeze(0).unsqueeze(0) * (y_trans_seq_cglu - y_trans_seq)
+        
+        # 重塑回原始形状：[B, C, H, W]
+        y_transformer = y_trans_seq.transpose(1, 2).view(B, C, H, W)
+        
+        # 拼接CNN和Transformer的输出
+        y_concat = torch.cat([y_cnn, y_transformer], dim=1)
+        
+        # 输出投影
+        out = self.cv2(y_concat)
+        
+        return out + x if self.add else out
+
+
+class MultiHeadSelfAttention(nn.Module):
+    """多头自注意力机制模块"""
+    
+    def __init__(self, embed_dim: int, num_heads: int = 8, dropout: float = 0.0):
+        super().__init__()
+        assert embed_dim % num_heads == 0, f"embed_dim ({embed_dim}) must be divisible by num_heads ({num_heads})"
+        
+        self.embed_dim = embed_dim
+        self.num_heads = num_heads
+        self.head_dim = embed_dim // num_heads
+        self.scale = self.head_dim ** -0.5
+        
+        self.qkv = nn.Linear(embed_dim, embed_dim * 3, bias=False)
+        self.attn_dropout = nn.Dropout(dropout)
+        self.proj = nn.Linear(embed_dim, embed_dim)
+        self.proj_dropout = nn.Dropout(dropout)
+        
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        前向传播
+        Args:
+            x: [B, N, C] 其中 N = H*W
+        Returns:
+            out: [B, N, C]
+        """
+        B, N, C = x.shape
+        
+        # 计算Q, K, V
+        qkv = self.qkv(x).reshape(B, N, 3, self.num_heads, self.head_dim).permute(2, 0, 3, 1, 4)
+        q, k, v = qkv[0], qkv[1], qkv[2]  # [B, num_heads, N, head_dim]
+        
+        # 计算注意力分数
+        attn = (q @ k.transpose(-2, -1)) * self.scale  # [B, num_heads, N, N]
+        attn = attn.softmax(dim=-1)
+        attn = self.attn_dropout(attn)
+        
+        # 应用注意力权重
+        x = (attn @ v).transpose(1, 2).reshape(B, N, C)  # [B, N, C]
+        
+        # 输出投影
+        x = self.proj(x)
+        x = self.proj_dropout(x)
+        
+        return x
+
+
+class ConvGLU(nn.Module):
+    """卷积门控线性单元 (Convolutional Gated Linear Unit)"""
+    
+    def __init__(self, in_channels: int, hidden_channels: int):
+        super().__init__()
+        self.conv1 = nn.Conv2d(in_channels, hidden_channels, 1)
+        self.conv2 = nn.Conv2d(in_channels, hidden_channels, 1)
+        self.conv3 = nn.Conv2d(hidden_channels, in_channels, 1)
+        self.gelu = nn.GELU()
+        
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        前向传播
+        Args:
+            x: [B, C, H, W]
+        Returns:
+            out: [B, C, H, W]
+        """
+        gate = self.conv1(x)
+        value = self.conv2(x)
+        hidden = self.gelu(gate) * value
+        out = self.conv3(hidden)
+        return out

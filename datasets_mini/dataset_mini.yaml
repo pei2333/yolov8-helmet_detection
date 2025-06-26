@@ -1,0 +1,12 @@
+# 安全帽检测mini数据集配置 (仅用于快速测试)
+train: datasets_mini/train/images
+val: datasets_mini/val/images
+
+# 类别数量
+nc: 3
+
+# 类别名称 (专注于安全帽检测)
+names:
+  0: person      # 人员
+  1: helmet      # 佩戴安全帽
+  2: no_helmet   # 未佩戴安全帽 
