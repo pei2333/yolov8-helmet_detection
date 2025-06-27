@@ -16,7 +16,7 @@ LW-YOLOv8 轻量级安全帽检测模型推理和评估脚本
     # 单张图像推理
     python inference_lw_yolov8.py --weights runs/train/lw-yolov8/weights/best.pt --source image.jpg
     
-    # 批量推理
+    # 批量图像推理
     python inference_lw_yolov8.py --weights runs/train/lw-yolov8/weights/best.pt --source images/
     
     # 性能评估
@@ -747,13 +747,46 @@ class ModelComparator:
             LOGGER.warning(f"生成对比图表失败: {e}")
 
 
+def find_latest_weights(base_dir: str, pattern: str) -> str:
+    """
+    自适应查找最新的权重文件
+    
+    Args:
+        base_dir (str): 基础目录
+        pattern (str): 文件夹名称模式，如 'lw-yolo' 或 'yolov8-baseline'
+        
+    Returns:
+        str: 找到的最新权重文件路径
+    """
+    base_path = Path(base_dir)
+    if not base_path.exists():
+        return ""
+    
+    # 查找匹配的文件夹
+    matching_dirs = []
+    for item in base_path.iterdir():
+        if item.is_dir() and pattern in item.name:
+            matching_dirs.append(item)
+    
+    if not matching_dirs:
+        return ""
+    
+    # 按文件夹名称排序，取最新的（数字最大的）
+    latest_dir = sorted(matching_dirs, key=lambda x: x.name)[-1]
+    weights_path = latest_dir / "weights" / "best.pt"
+    
+    if weights_path.exists():
+        return str(weights_path)
+    else:
+        return ""
+
 def main():
     """主函数"""
     parser = argparse.ArgumentParser(description='LW-YOLOv8 轻量级安全帽检测模型推理和评估')
     
     # 推理参数
-    parser.add_argument('--weights', type=str, default='runs/train/lw-yolov8/weights/best.pt', help='模型权重文件路径')
-    parser.add_argument('--source', type=str, default='datasets/val/images', help='输入源（图像/目录/视频）')
+    parser.add_argument('--weights', type=str, default='', help='模型权重文件路径')
+    parser.add_argument('--source', type=str, default='datasets_mini/val/images', help='输入源（图像/目录/视频）')
     parser.add_argument('--output', type=str, default='runs/detect', help='输出目录')
     parser.add_argument('--conf', type=float, default=0.25, help='置信度阈值')
     parser.add_argument('--iou', type=float, default=0.45, help='NMS IoU阈值')
@@ -761,22 +794,40 @@ def main():
     
     # 评估参数
     parser.add_argument('--evaluate', action='store_true', help='评估模型')
-    parser.add_argument('--data', type=str, default='datasets/dataset.yaml', help='数据配置文件路径')
+    parser.add_argument('--data', type=str, default='datasets_mini/dataset_mini.yaml', help='数据配置文件路径')
     
     # 对比参数
     parser.add_argument('--compare', action='store_true', help='对比模型')
-    parser.add_argument('--lw-weights', type=str, default='runs/train/lw-yolov8/weights/best.pt', help='LW-YOLOv8权重路径')
-    parser.add_argument('--yolo-weights', type=str, default='runs/train/yolov8-baseline/weights/best.pt', help='原始YOLOv8权重路径')
+    parser.add_argument('--lw-weights', type=str, default='', help='LW-YOLOv8权重路径')
+    parser.add_argument('--yolo-weights', type=str, default='', help='原始YOLOv8权重路径')
     
     # 视频推理
     parser.add_argument('--video', action='store_true', help='视频推理模式')
     
     args = parser.parse_args()
     
-    # 模型对比
+    # 自适应查找权重文件
+    if not args.weights:
+        args.weights = find_latest_weights('runs/train', 'lw-yolo')
+        if args.weights:
+            LOGGER.info(f"自动找到LW-YOLOv8权重: {args.weights}")
+        else:
+            LOGGER.warning("未找到LW-YOLOv8权重文件，请手动指定 --weights 参数")
+    
     if args.compare:
+        # 自动查找对比权重
+        if not args.lw_weights:
+            args.lw_weights = find_latest_weights('runs/train', 'lw-yolo')
+            if args.lw_weights:
+                LOGGER.info(f"自动找到LW-YOLOv8权重: {args.lw_weights}")
+        
+        if not args.yolo_weights:
+            args.yolo_weights = find_latest_weights('runs/train', 'yolov8-baseline')
+            if args.yolo_weights:
+                LOGGER.info(f"自动找到YOLOv8基线权重: {args.yolo_weights}")
+        
         if not args.lw_weights or not args.yolo_weights or not args.data:
-            parser.error("对比模式需要 --lw-weights, --yolo-weights 和 --data 参数")
+            parser.error("对比模式需要找到LW-YOLOv8和YOLOv8基线权重文件，以及 --data 参数")
         
         comparator = ModelComparator(args.lw_weights, args.yolo_weights, args.data)
         comparison_results = comparator.compare_models()

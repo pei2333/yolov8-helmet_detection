@@ -26,6 +26,39 @@ import sys
 import subprocess
 from pathlib import Path
 
+def find_latest_weights(base_dir: str, pattern: str) -> str:
+    """
+    自适应查找最新的权重文件
+    
+    Args:
+        base_dir (str): 基础目录
+        pattern (str): 文件夹名称模式，如 'lw-yolo' 或 'yolov8-baseline'
+        
+    Returns:
+        str: 找到的最新权重文件路径
+    """
+    base_path = Path(base_dir)
+    if not base_path.exists():
+        return ""
+    
+    # 查找匹配的文件夹
+    matching_dirs = []
+    for item in base_path.iterdir():
+        if item.is_dir() and pattern in item.name:
+            matching_dirs.append(item)
+    
+    if not matching_dirs:
+        return ""
+    
+    # 按文件夹名称排序，取最新的（数字最大的）
+    latest_dir = sorted(matching_dirs, key=lambda x: x.name)[-1]
+    weights_path = latest_dir / "weights" / "best.pt"
+    
+    if weights_path.exists():
+        return str(weights_path)
+    else:
+        return ""
+
 def run_command(cmd, description):
     """运行命令并显示进度"""
     print(f"\n🚀 {description}")
@@ -89,12 +122,13 @@ def main():
 from ultralytics import YOLO
 model = YOLO('yolov8s.pt')
 model.train(
-    data='datasets/dataset.yaml',
+    data='datasets_mini/dataset_mini.yaml',
     epochs={args.epochs},
     batch={args.batch},
     project='runs/train',
     name='yolov8-baseline',
-    amp=True
+    amp=True,
+    exist_ok=True
 )
 print('✅ 基线YOLOv8训练完成')
 """
@@ -111,24 +145,50 @@ print('✅ 基线YOLOv8训练完成')
     
     # 3. 模型对比（如果有基线模型）
     if not args.no_compare and not args.lw_only:
-        cmd_compare = [
-            sys.executable, 'inference_lw_yolov8.py',
-            '--compare'
-        ]
+        # 自适应查找最新的权重文件
+        lw_weights = find_latest_weights('runs/train', 'lw-yolo')
+        baseline_weights = find_latest_weights('runs/train', 'yolov8-baseline')
         
-        if run_command(cmd_compare, "步骤 3: 模型对比分析"):
-            success_count += 1
+        if lw_weights and baseline_weights:
+            print(f"🔍 找到LW-YOLOv8权重: {lw_weights}")
+            print(f"🔍 找到基线YOLOv8权重: {baseline_weights}")
+            
+            cmd_compare = [
+                sys.executable, 'inference_lw_yolov8.py',
+                '--compare',
+                '--lw-weights', lw_weights,
+                '--yolo-weights', baseline_weights
+            ]
+            
+            if run_command(cmd_compare, "步骤 3: 模型对比分析"):
+                success_count += 1
+            else:
+                print("⚠️ 模型对比失败")
         else:
-            print("⚠️ 模型对比失败")
+            print("⚠️ 未找到训练好的权重文件，跳过模型对比")
+            if not lw_weights:
+                print(f"   - 未找到LW-YOLOv8权重")
+            if not baseline_weights:
+                print(f"   - 未找到基线YOLOv8权重")
     elif args.lw_only:
         print("ℹ️ 跳过模型对比（仅训练LW-YOLOv8模式）")
         success_count += 1
     
     # 4. 推理测试
     if not args.no_inference:
-        cmd_inference = [
-            sys.executable, 'inference_lw_yolov8.py'
-        ]
+        # 自适应查找最新的LW-YOLOv8权重
+        lw_weights = find_latest_weights('runs/train', 'lw-yolo')
+        if lw_weights:
+            print(f"🔍 找到LW-YOLOv8权重用于推理: {lw_weights}")
+            cmd_inference = [
+                sys.executable, 'inference_lw_yolov8.py',
+                '--weights', lw_weights
+            ]
+        else:
+            print("⚠️ 未找到LW-YOLOv8权重，使用默认推理")
+            cmd_inference = [
+                sys.executable, 'inference_lw_yolov8.py'
+            ]
         
         if run_command(cmd_inference, "步骤 4: 推理测试"):
             success_count += 1
@@ -139,10 +199,20 @@ print('✅ 基线YOLOv8训练完成')
         success_count += 1
     
     # 5. 模型评估
-    cmd_eval = [
-        sys.executable, 'inference_lw_yolov8.py',
-        '--evaluate'
-    ]
+    lw_weights = find_latest_weights('runs/train', 'lw-yolo')
+    if lw_weights:
+        print(f"🔍 找到LW-YOLOv8权重用于评估: {lw_weights}")
+        cmd_eval = [
+            sys.executable, 'inference_lw_yolov8.py',
+            '--evaluate',
+            '--weights', lw_weights
+        ]
+    else:
+        print("⚠️ 未找到LW-YOLOv8权重，使用默认评估")
+        cmd_eval = [
+            sys.executable, 'inference_lw_yolov8.py',
+            '--evaluate'
+        ]
     
     if run_command(cmd_eval, "步骤 5: 模型评估"):
         success_count += 1
@@ -165,12 +235,13 @@ print('✅ 基线YOLOv8训练完成')
     print("\n📁 主要输出文件:")
     
     # 检查生成的文件
-    lw_weights = Path('runs/train/lw-yolov8/weights/best.pt')
-    if lw_weights.exists():
+    # 自适应查找LW-YOLOv8权重路径
+    lw_weights = find_latest_weights('runs/train', 'lw-yolo')
+    if lw_weights:
         print(f"✅ LW-YOLOv8权重: {lw_weights}")
     
-    baseline_weights = Path('runs/train/yolov8-baseline/weights/best.pt')
-    if baseline_weights.exists():
+    baseline_weights = find_latest_weights('runs/train', 'yolov8-baseline')
+    if baseline_weights:
         print(f"✅ 基线YOLOv8权重: {baseline_weights}")
     
     compare_dir = Path('runs/compare')
@@ -182,7 +253,7 @@ print('✅ 基线YOLOv8训练完成')
         print(f"✅ 推理结果: {detect_dir}")
     
     print("\n🚀 下一步建议:")
-    if lw_weights.exists():
+    if lw_weights:
         print("1. 查看训练曲线和日志文件")
         print("2. 使用训练好的模型进行更多测试")
         print("3. 考虑模型优化和部署")
@@ -194,4 +265,4 @@ print('✅ 基线YOLOv8训练完成')
     print("\n📖 更多信息请参考: README_LW_YOLOv8.md")
 
 if __name__ == '__main__':
-    main() 
+    main()          

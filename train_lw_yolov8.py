@@ -55,7 +55,7 @@ class LWYOLOv8Trainer:
             'epochs': 300,
             'batch': 16,
             'imgsz': 640,
-            'device': 'auto',
+            'device': 'cuda',
             'workers': 8,
             'project': 'runs/train',
             'name': 'lw-yolov8',
@@ -210,7 +210,23 @@ class LWYOLOv8Trainer:
         """验证模型性能"""
         
         if weights_path is None:
-            weights_path = Path(self.training_args['project']) / self.training_args['name'] / 'weights' / 'best.pt'
+            # 尝试多个可能的权重路径
+            possible_paths = [
+                Path(self.training_args['project']) / self.training_args['name'] / 'weights' / 'best.pt',
+                Path(self.training_args['project']) / f"{self.training_args['name']}9" / 'weights' / 'best.pt',
+                Path(self.training_args['project']) / f"{self.training_args['name']}8" / 'weights' / 'best.pt',
+                Path(self.training_args['project']) / f"{self.training_args['name']}7" / 'weights' / 'best.pt',
+            ]
+            
+            weights_path = None
+            for path in possible_paths:
+                if path.exists():
+                    weights_path = path
+                    break
+            
+            if weights_path is None:
+                LOGGER.warning("未找到训练好的权重文件，跳过验证")
+                return None
             
         LOGGER.info(f"正在验证模型: {weights_path}")
         
@@ -230,7 +246,7 @@ class LWYOLOv8Trainer:
             dnn=self.training_args['dnn'],
             plots=self.training_args['plots'],
             save_json=self.training_args['save_json'],
-            save_hybrid=self.training_args['save_hybrid'],
+            save_hybrid=self.training_args.get('save_hybrid', False),
         )
         
         LOGGER.info("验证完成!")
@@ -264,7 +280,7 @@ def main():
     parser = argparse.ArgumentParser(description='LW-YOLOv8 轻量级安全帽检测模型训练')
     parser.add_argument('--model', type=str, default='yolov8s.pt',
                         help='预训练模型权重路径(用于微调)')
-    parser.add_argument('--data', type=str, default='datasets/dataset.yaml', 
+    parser.add_argument('--data', type=str, default='datasets_mini/dataset_mini.yaml', 
                         help='数据集配置文件路径')
     parser.add_argument('--pretrained', type=str, default='yolov8s.pt',
                         help='预训练权重路径(自动下载)')
@@ -274,8 +290,8 @@ def main():
                         help='批次大小')
     parser.add_argument('--imgsz', type=int, default=640, 
                         help='输入图像尺寸')
-    parser.add_argument('--device', type=str, default='auto',
-                        help='训练设备 (cpu, 0, 1, 2, 3, auto)')
+    parser.add_argument('--device', type=str, default='cuda' if torch.cuda.is_available() else 'cpu',
+                        help='训练设备 (cpu, cuda, cuda:0, cuda:1, etc.)')
     parser.add_argument('--workers', type=int, default=8,
                         help='数据加载器工作进程数')
     parser.add_argument('--project', type=str, default='runs/train',
