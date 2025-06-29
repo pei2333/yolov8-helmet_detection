@@ -10,7 +10,7 @@ LW-YOLOv8 轻量级安全帽检测模型训练脚本
 3. SIoU损失函数：形状感知的IoU损失
 
 使用示例:
-    python train_lw_yolov8.py --data safety_helmet.yaml --model lw-yolov8s.yaml --epochs 300
+    python train_lw_yolov8.py --data safety_helmet.yaml --model lw-yolov8s.yaml --epochs 300 
 """
 
 import argparse
@@ -245,8 +245,8 @@ def create_safety_helmet_data_config():
         'train': 'safety_helmet/train/images',  # 训练图像相对路径
         'val': 'safety_helmet/val/images',      # 验证图像相对路径
         'test': 'safety_helmet/test/images',    # 测试图像相对路径（可选）
-        'nc': 3,                             # 类别数量
-        'names': {0: 'person', 1: 'helmet', 2: 'no_helmet'}  # 类别名称
+        'nc': 2,                             # 类别数量：只检测头部和安全帽
+        'names': {0: 'head', 1: 'helmet'}    # 类别名称：0-无安全帽的头部，1-戴安全帽的头部
     }
     
     # 保存配置文件
@@ -274,8 +274,8 @@ def main():
                         help='批次大小')
     parser.add_argument('--imgsz', type=int, default=640, 
                         help='输入图像尺寸')
-    parser.add_argument('--device', type=str, default='auto',
-                        help='训练设备 (cpu, 0, 1, 2, 3, auto)')
+    parser.add_argument('--device', type=str, choices=['cpu', 'cuda'], default='cuda',
+                        help='训练设备选择 (cpu 或 cuda)')
     parser.add_argument('--workers', type=int, default=8,
                         help='数据加载器工作进程数')
     parser.add_argument('--project', type=str, default='runs/train',

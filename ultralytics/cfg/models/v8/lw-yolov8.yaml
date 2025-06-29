@@ -3,7 +3,7 @@
 # 专为无人机视角下的安全帽佩戴检测任务优化设计
 
 # 模型参数  
-nc: 3  # 类别数量 (person=0, helmet=1, no_helmet=2)
+nc: 2  # 类别数量 (head=0, helmet=1)
 scales: # 模型复合缩放常数
   # [depth, width, max_channels]
   n: [0.33, 0.25, 1024] # LW-YOLOv8n summary: 优化后的轻量级版本

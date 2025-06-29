@@ -2057,7 +2057,6 @@ class CSP_CTFN(nn.Module):
         super().__init__()
         self.c = int(c2 * e)  # 隐藏通道数
         self.cv1 = Conv(c1, 2 * self.c, 1, 1)  # 输入投影
-        self.cv2 = Conv(2 * self.c, c2, 1)     # 输出投影
         
         # 根据特征图层级调整CNN和Transformer的比例
         # 浅层大尺寸特征图减少Transformer部分，深层小尺寸特征图增加Transformer比例
@@ -2065,7 +2064,33 @@ class CSP_CTFN(nn.Module):
         self.transformer_ratio = 1 - self.cnn_ratio
         
         self.cnn_channels = int(self.c * self.cnn_ratio)
-        self.transformer_channels = self.c - self.cnn_channels
+        
+        # 确保transformer_channels可以被num_heads整除
+        num_heads = 8
+        transformer_channels_raw = self.c - self.cnn_channels
+        if transformer_channels_raw > 0:
+            # 调整transformer_channels使其可以被num_heads整除
+            self.transformer_channels = (transformer_channels_raw // num_heads) * num_heads
+            if self.transformer_channels == 0:
+                self.transformer_channels = num_heads  # 至少保证一个head的维度
+            # 相应调整cnn_channels
+            self.cnn_channels = self.c - self.transformer_channels
+        else:
+            self.transformer_channels = 0
+        
+        # 输出投影层，输入通道数为拼接后的总通道数
+        total_concat_channels = self.cnn_channels + self.transformer_channels
+        
+        # 确保total_concat_channels > 0
+        if total_concat_channels <= 0:
+            print(f"Warning: total_concat_channels={total_concat_channels}, c1={c1}, c2={c2}, e={e}")
+            print(f"self.c={self.c}, cnn_channels={self.cnn_channels}, transformer_channels={self.transformer_channels}")
+            # 回退到简单的Conv
+            total_concat_channels = self.c
+            self.cnn_channels = self.c
+            self.transformer_channels = 0
+        
+        self.cv2 = Conv(total_concat_channels, c2, 1)
         
         # CNN分支 - 使用传统卷积处理
         self.cnn_blocks = nn.ModuleList([
@@ -2074,7 +2099,7 @@ class CSP_CTFN(nn.Module):
         
         # Transformer分支 - 多头自注意力机制
         if self.transformer_channels > 0:
-            self.mhsa = MultiHeadSelfAttention(self.transformer_channels, num_heads=8, dropout=0.0)
+            self.mhsa = MultiHeadSelfAttention(self.transformer_channels, num_heads=num_heads, dropout=0.0)
             self.norm1 = nn.LayerNorm(self.transformer_channels)
             self.norm2 = nn.LayerNorm(self.transformer_channels)
             

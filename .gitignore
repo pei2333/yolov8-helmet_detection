@@ -92,6 +92,7 @@ safety_helmet_detection/runs/
 *.7z
 datasets.zip
 data.zip
+dataset_OnHands/
 
 # 模型检查点和权重
 checkpoints/

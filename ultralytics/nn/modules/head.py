@@ -1253,31 +1253,48 @@ class PSCDetect(Detect):
         """
         super().__init__(nc, ch)
         
-        # 重新定义共享的卷积层
-        c2, c3 = max((16, ch[0] // 4, self.reg_max * 4)), max(ch[0], min(self.nc, 100))
+        # 统一的中间通道数，基于最小的输入通道数
+        c_unified = min(ch) if ch else 256
+        c2, c3 = max((16, c_unified // 4, self.reg_max * 4)), max(c_unified, min(self.nc, 100))
+        
+        # 为每个尺度创建输入适配层（将不同通道数统一为c_unified）
+        self.input_adapters_reg = nn.ModuleList([
+            nn.Conv2d(ch_i, c_unified, 1, bias=False) for ch_i in ch
+        ])
+        self.input_adapters_cls = nn.ModuleList([
+            nn.Conv2d(ch_i, c_unified, 1, bias=False) for ch_i in ch
+        ])
+        
+        # 适配层的BatchNorm
+        self.input_bn_reg = nn.ModuleList([
+            nn.BatchNorm2d(c_unified) for _ in ch
+        ])
+        self.input_bn_cls = nn.ModuleList([
+            nn.BatchNorm2d(c_unified) for _ in ch
+        ])
         
         # 共享的回归分支卷积层（不包含BatchNorm）
         self.shared_conv_reg = nn.ModuleList([
-            nn.Conv2d(ch[0], c2, 3, 1, 1, bias=False),  # 第一层
-            nn.Conv2d(c2, c2, 3, 1, 1, bias=False),     # 第二层
-            nn.Conv2d(c2, 4 * self.reg_max, 1, bias=True)  # 输出层
+            nn.Conv2d(c_unified, c2, 3, 1, 1, bias=False),  # 第一层
+            nn.Conv2d(c2, c2, 3, 1, 1, bias=False),         # 第二层
+            nn.Conv2d(c2, 4 * self.reg_max, 1, bias=True)   # 输出层
         ])
         
         # 共享的分类分支卷积层（不包含BatchNorm）
         if self.legacy:
             self.shared_conv_cls = nn.ModuleList([
-                nn.Conv2d(ch[0], c3, 3, 1, 1, bias=False),  # 第一层
-                nn.Conv2d(c3, c3, 3, 1, 1, bias=False),     # 第二层
-                nn.Conv2d(c3, self.nc, 1, bias=True)        # 输出层
+                nn.Conv2d(c_unified, c3, 3, 1, 1, bias=False),  # 第一层
+                nn.Conv2d(c3, c3, 3, 1, 1, bias=False),         # 第二层
+                nn.Conv2d(c3, self.nc, 1, bias=True)            # 输出层
             ])
         else:
             # 使用DWConv的版本
             self.shared_conv_cls = nn.ModuleList([
-                nn.Conv2d(ch[0], ch[0], 3, 1, 1, groups=ch[0], bias=False),  # DWConv
-                nn.Conv2d(ch[0], c3, 1, bias=False),                         # 1x1 Conv
-                nn.Conv2d(c3, c3, 3, 1, 1, groups=c3, bias=False),          # DWConv
-                nn.Conv2d(c3, c3, 1, bias=False),                            # 1x1 Conv
-                nn.Conv2d(c3, self.nc, 1, bias=True)                         # 输出层
+                nn.Conv2d(c_unified, c_unified, 3, 1, 1, groups=c_unified, bias=False),  # DWConv
+                nn.Conv2d(c_unified, c3, 1, bias=False),                                 # 1x1 Conv
+                nn.Conv2d(c3, c3, 3, 1, 1, groups=c3, bias=False),                      # DWConv
+                nn.Conv2d(c3, c3, 1, bias=False),                                        # 1x1 Conv
+                nn.Conv2d(c3, self.nc, 1, bias=True)                                     # 输出层
             ])
         
         # 为每个尺度独立的BatchNorm层 - 回归分支
@@ -1299,7 +1316,7 @@ class PSCDetect(Detect):
         else:
             self.bn_cls = nn.ModuleList([
                 nn.ModuleList([
-                    nn.BatchNorm2d(ch[0]),      # DWConv BN
+                    nn.BatchNorm2d(c_unified),  # DWConv BN
                     nn.BatchNorm2d(c3),         # 1x1 Conv BN
                     nn.BatchNorm2d(c3),         # DWConv BN
                     nn.BatchNorm2d(c3),         # 1x1 Conv BN
@@ -1316,6 +1333,10 @@ class PSCDetect(Detect):
         # 如果是end2end模式，也需要处理one2one分支
         if self.end2end:
             import copy
+            self.one2one_input_adapters_reg = copy.deepcopy(self.input_adapters_reg)
+            self.one2one_input_adapters_cls = copy.deepcopy(self.input_adapters_cls)
+            self.one2one_input_bn_reg = copy.deepcopy(self.input_bn_reg)
+            self.one2one_input_bn_cls = copy.deepcopy(self.input_bn_cls)
             self.one2one_shared_conv_reg = copy.deepcopy(self.shared_conv_reg)
             self.one2one_shared_conv_cls = copy.deepcopy(self.shared_conv_cls)
             self.one2one_bn_reg = copy.deepcopy(self.bn_reg)
@@ -1333,13 +1354,21 @@ class PSCDetect(Detect):
         Returns:
             Tuple[torch.Tensor, torch.Tensor]: 回归输出和分类输出
         """
-        # 选择使用的卷积层和BN层
+        # 选择使用的适配层、卷积层和BN层
         if use_one2one and self.end2end:
+            adapter_reg = self.one2one_input_adapters_reg[scale_idx]
+            adapter_cls = self.one2one_input_adapters_cls[scale_idx]
+            adapter_bn_reg = self.one2one_input_bn_reg[scale_idx]
+            adapter_bn_cls = self.one2one_input_bn_cls[scale_idx]
             conv_reg = self.one2one_shared_conv_reg
             conv_cls = self.one2one_shared_conv_cls
             bn_reg = self.one2one_bn_reg[scale_idx]
             bn_cls = self.one2one_bn_cls[scale_idx]
         else:
+            adapter_reg = self.input_adapters_reg[scale_idx]
+            adapter_cls = self.input_adapters_cls[scale_idx]
+            adapter_bn_reg = self.input_bn_reg[scale_idx]
+            adapter_bn_cls = self.input_bn_cls[scale_idx]
             conv_reg = self.shared_conv_reg
             conv_cls = self.shared_conv_cls
             bn_reg = self.bn_reg[scale_idx]
@@ -1347,23 +1376,26 @@ class PSCDetect(Detect):
         
         # 回归分支
         reg_out = x
-        reg_out = self.act(bn_reg[0](conv_reg[0](reg_out)))  # 第一层：Conv + BN + Act
-        reg_out = self.act(bn_reg[1](conv_reg[1](reg_out)))  # 第二层：Conv + BN + Act
-        reg_out = conv_reg[2](reg_out)                       # 输出层：Conv (no BN, no Act)
+        reg_out = self.act(adapter_bn_reg(adapter_reg(reg_out)))         # 输入适配层：Conv + BN + Act
+        reg_out = self.act(bn_reg[0](conv_reg[0](reg_out)))              # 第一层：Conv + BN + Act
+        reg_out = self.act(bn_reg[1](conv_reg[1](reg_out)))              # 第二层：Conv + BN + Act
+        reg_out = conv_reg[2](reg_out)                                   # 输出层：Conv (no BN, no Act)
         
         # 分类分支
         cls_out = x
+        cls_out = self.act(adapter_bn_cls(adapter_cls(cls_out)))         # 输入适配层：Conv + BN + Act
+        
         if self.legacy:
-            cls_out = self.act(bn_cls[0](conv_cls[0](cls_out)))  # 第一层：Conv + BN + Act
-            cls_out = self.act(bn_cls[1](conv_cls[1](cls_out)))  # 第二层：Conv + BN + Act
-            cls_out = conv_cls[2](cls_out)                       # 输出层：Conv (no BN, no Act)
+            cls_out = self.act(bn_cls[0](conv_cls[0](cls_out)))          # 第一层：Conv + BN + Act
+            cls_out = self.act(bn_cls[1](conv_cls[1](cls_out)))          # 第二层：Conv + BN + Act
+            cls_out = conv_cls[2](cls_out)                               # 输出层：Conv (no BN, no Act)
         else:
             # DWConv版本
-            cls_out = self.act(bn_cls[0](conv_cls[0](cls_out)))  # DWConv + BN + Act
-            cls_out = self.act(bn_cls[1](conv_cls[1](cls_out)))  # 1x1 Conv + BN + Act
-            cls_out = self.act(bn_cls[2](conv_cls[2](cls_out)))  # DWConv + BN + Act
-            cls_out = self.act(bn_cls[3](conv_cls[3](cls_out)))  # 1x1 Conv + BN + Act
-            cls_out = conv_cls[4](cls_out)                       # 输出层：Conv (no BN, no Act)
+            cls_out = self.act(bn_cls[0](conv_cls[0](cls_out)))          # DWConv + BN + Act
+            cls_out = self.act(bn_cls[1](conv_cls[1](cls_out)))          # 1x1 Conv + BN + Act
+            cls_out = self.act(bn_cls[2](conv_cls[2](cls_out)))          # DWConv + BN + Act
+            cls_out = self.act(bn_cls[3](conv_cls[3](cls_out)))          # 1x1 Conv + BN + Act
+            cls_out = conv_cls[4](cls_out)                               # 输出层：Conv (no BN, no Act)
         
         return reg_out, cls_out
     

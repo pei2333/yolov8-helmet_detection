@@ -1,144 +1,118 @@
-# Ultralytics轻量化安全帽检测系统 - 依赖文件
-# 项目: Safety Helmet Detection with Lightweight YOLO
-# 维护者: guoba pei <2907631465@qq.com>
+# LW-YOLOv8 安全帽检测项目依赖包
+# 基于轻量级YOLOv8的安全帽佩戴检测算法
 
-# ===== 核心深度学习框架 =====
+# 核心深度学习框架
 torch>=2.0.0
 torchvision>=0.15.0
 torchaudio>=2.0.0
 
-# ===== YOLOv8核心框架 =====
+# Ultralytics YOLO框架
 ultralytics>=8.0.0
 
-# ===== 计算机视觉库 =====
-opencv-python>=4.8.0
-opencv-contrib-python>=4.8.0
+# 计算机视觉和图像处理
+opencv-python>=4.6.0
+opencv-contrib-python>=4.6.0
 Pillow>=9.0.0
 
-# ===== 基础数据处理 =====
-numpy>=1.24.0
-pandas>=2.0.0
-matplotlib>=3.7.0
-seaborn>=0.12.0
+# 数据处理和科学计算
+numpy>=1.21.0
+pandas>=1.3.0
+scipy>=1.7.0
 
-# ===== 配置和工具 =====
+# 机器学习工具
+scikit-learn>=1.0.0
+
+# 可视化工具
+matplotlib>=3.3.0
+seaborn>=0.11.0
+plotly>=5.0.0
+
+# 配置文件处理
 PyYAML>=6.0
-tqdm>=4.65.0
-pathlib
-argparse
+pyyaml-include>=1.3.0
 
-# ===== 轻量化模型性能分析 =====
-thop>=0.1.1               # FLOPs和参数量计算
-fvcore>=0.1.5             # Facebook计算机视觉核心库
-ptflops>=0.6.9            # PyTorch FLOPs计算
-torchinfo>=1.8.0          # 模型信息统计
-torchsummary>=1.5.1       # 模型结构总结
+# 网络请求和API
+requests>=2.25.0
+urllib3>=1.26.0
 
-# ===== 模型优化与部署 =====
-onnx>=1.14.0
-onnxruntime>=1.15.0
-onnxruntime-gpu>=1.15.0   # GPU加速推理
-tensorrt>=8.6.0           # NVIDIA TensorRT优化(可选)
-openvino>=2023.0.0        # Intel OpenVINO优化(可选)
+# 进度条和日志
+tqdm>=4.62.0
+psutil>=5.8.0
 
-# ===== 实验跟踪与可视化 =====
-tensorboard>=2.13.0
-wandb>=0.15.0             # 实验管理和可视化
-mlflow>=2.7.0             # 机器学习生命周期管理
-neptune-client>=1.0.0     # 云端实验跟踪(可选)
-
-# ===== 数据增强与预处理 =====
-albumentations>=1.3.0
+# 图像增强和处理
+albumentations>=1.0.0
 imgaug>=0.4.0
-kornia>=0.7.0             # 可微分计算机视觉
-torchvision-transforms    # 扩展变换
 
-# ===== 轻量化网络组件 =====
-timm>=0.9.0               # PyTorch图像模型库
-efficientnet-pytorch>=0.7.1
-mobilenet-v3-pytorch>=0.1.0
-fasternet                 # FasterNet实现(如果可用)
+# 验证和检查工具
+thop>=0.1.0  # 用于FLOPs计算
+fvcore>=0.1.5  # Facebook的计算机视觉核心库
 
-# ===== 注意力机制 =====
-einops>=0.6.0             # 张量操作
-attention>=1.0.0          # 注意力机制实现
-pytorch-lightning>=2.0.0  # 深度学习框架
+# 导出和推理优化 (可选)
+onnx>=1.12.0
+onnxruntime>=1.12.0
+openvino>=2022.3.0
 
-# ===== 损失函数增强 =====
-focal-loss-torch>=0.0.1   # Focal Loss实现
-iou-loss>=1.0.0           # IoU Loss变种
-segmentation-models-pytorch>=0.3.0  # 分割模型(包含损失函数)
+# 云端和部署相关 (可选)
+boto3>=1.20.0  # AWS支持
+google-cloud-storage>=2.0.0  # Google Cloud支持
 
-# ===== 数据集处理 =====
-pycocotools>=2.0.6        # COCO数据集工具
-labelme>=5.2.0            # 标注工具
-roboflow>=1.1.0           # 数据集管理
-supervision>=0.15.0       # 计算机视觉工具包
+# 数据集和标注工具
+roboflow>=1.0.0  # 数据集管理
+labelImg>=1.8.0  # 标注工具
 
-# ===== 科学计算与分析 =====
-scikit-learn>=1.3.0
-scipy>=1.10.0
-requests>=2.28.0
-h5py>=3.8.0               # HDF5文件格式
-pickle5>=0.0.12           # 序列化工具
+# 测试和开发工具 (开发环境)
+pytest>=6.0.0
+pytest-cov>=3.0.0
+black>=22.0.0
+isort>=5.10.0
+flake8>=4.0.0
 
-# ===== 开发与测试工具 =====
-pytest>=7.0.0
-black>=23.0.0
-flake8>=6.0.0
-mypy>=1.5.0               # 类型检查
-isort>=5.12.0             # 导入排序
-pre-commit>=3.3.0         # Git钩子
-
-# ===== Jupyter环境 =====
+# Jupyter和可视化 (开发环境)
 jupyter>=1.0.0
-ipython>=8.0.0
-notebook>=6.5.0
-ipywidgets>=8.0.0         # 交互式组件
+ipywidgets>=7.6.0
+notebook>=6.4.0
 
-# ===== 系统监控与调试 =====
-psutil>=5.9.0             # 系统进程监控
-GPUtil>=1.4.0             # GPU监控
-memory-profiler>=0.61.0   # 内存分析
-line-profiler>=4.0.0      # 代码性能分析
-py-spy>=0.3.14            # Python性能分析
+# 性能监控和分析
+tensorboard>=2.8.0
+wandb>=0.12.0  # Weights & Biases实验跟踪
 
-# ===== 多媒体处理 =====
-ffmpeg-python>=0.2.0      # 视频处理
-moviepy>=1.0.3            # 视频编辑
-imageio>=2.31.0           # 图像IO
-scikit-image>=0.21.0      # 图像处理
+# 多进程和并行处理
+multiprocess>=0.70.0
 
-# ===== Web界面(可选) =====
-streamlit>=1.25.0         # Web应用框架
-gradio>=3.40.0            # ML模型界面
-flask>=2.3.0              # 轻量级Web框架
-fastapi>=0.100.0          # 现代Web API
+# 系统信息获取
+GPUtil>=1.4.0  # GPU使用监控
+py-cpuinfo>=8.0.0  # CPU信息
 
-# ===== 模型压缩与量化 =====
-torch-pruning>=1.2.0      # 模型剪枝
-pytorch-quantization>=2.1.0  # 量化
-neural-compressor>=2.3.0  # Intel神经网络压缩器
+# 时间和日期处理
+python-dateutil>=2.8.0
 
-# ===== 边缘设备部署 =====
-onnx-simplifier>=0.4.0    # ONNX模型简化
-onnx2torch>=1.5.0         # ONNX转PyTorch
-torch2trt>=0.4.0          # PyTorch转TensorRT
+# 类型检查和开发工具
+typing-extensions>=4.0.0
 
-# ===== 云服务集成(可选) =====
-boto3>=1.28.0             # AWS SDK
-google-cloud-storage>=2.10.0  # Google Cloud存储
-azure-storage-blob>=12.17.0   # Azure存储
+# 文件格式支持
+pycocotools>=2.0.4  # COCO数据集支持
+lxml>=4.6.0  # XML解析
 
-# ===== 其他实用工具 =====
-colorama>=0.4.6           # 终端颜色输出
-rich>=13.5.0              # 丰富的终端输出
-click>=8.1.0              # 命令行界面
-hydra-core>=1.3.0         # 配置管理
-omegaconf>=2.3.0          # 配置文件处理
+# 高级图像处理
+kornia>=0.6.0  # 可微分计算机视觉库
 
-# ===== 特定版本锁定(重要依赖) =====
-# 确保兼容性的关键依赖版本
-setuptools>=68.0.0
-wheel>=0.41.0
-pip>=23.2.0 
+# 数据增强和预处理
+imgaug>=0.4.0
+shapely>=1.8.0  # 几何形状处理
+
+# Web应用和可视化 (可选)
+streamlit>=1.20.0  # Web界面
+gradio>=3.0.0  # ML应用界面
+dash>=2.0.0  # 仪表板
+
+# 模型压缩和优化 (可选)
+torch-pruning>=1.0.0  # 模型剪枝
+ptflops>=0.6.0  # PyTorch FLOPs计算
+
+# 分布式训练支持
+accelerate>=0.15.0
+
+# 其他工具库
+rich>=12.0.0  # 终端美化输出
+colorama>=0.4.0  # 跨平台彩色终端文本
+pathlib2>=2.3.0  # 路径处理增强 

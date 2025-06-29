@@ -3,10 +3,9 @@ train: train/images
 val: val/images
 
 # 类别数量
-nc: 3
+nc: 2
 
-# 类别名称 (专注于安全帽检测)
+# 类别名称 (只检测头部和安全帽，不检测人)
 names:
-  0: person      # 人员
-  1: helmet      # 佩戴安全帽
-  2: no_helmet   # 未佩戴安全帽 
+  0: head        # 无安全帽的头部
+  1: helmet      # 戴安全帽的头部 

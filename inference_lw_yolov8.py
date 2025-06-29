@@ -61,7 +61,7 @@ except ImportError:
 class SafetyHelmetInferencer:
     """安全帽检测推理器"""
     
-    def __init__(self, weights: str, conf_threshold: float = 0.25, iou_threshold: float = 0.45):
+    def __init__(self, weights: str, conf_threshold: float = 0.25, iou_threshold: float = 0.45, device: str = 'cpu'):
         """
         初始化推理器
         
@@ -69,27 +69,31 @@ class SafetyHelmetInferencer:
             weights (str): 模型权重文件路径
             conf_threshold (float): 置信度阈值
             iou_threshold (float): NMS IoU阈值
+            device (str): 推理设备选择 (cpu 或 cuda)
         """
         self.weights = weights
         self.conf_threshold = conf_threshold
         self.iou_threshold = iou_threshold
+        self.device = device
         
         # 加载模型
         LOGGER.info(f"正在加载模型: {weights}")
         self.model = YOLO(weights)
         
+        # 设置设备
+        if device != 'cpu':
+            self.model.to(device)
+        
         # 类别名称（根据您的数据集）
         self.class_names = {
-            0: "person",
-            1: "helmet", 
-            2: "no_helmet"
+            0: "head",     # 无安全帽的头部
+            1: "helmet"    # 戴安全帽的头部
         }
         
         # 类别颜色
         self.class_colors = {
-            0: (255, 255, 255),  # 白色 - person
-            1: (0, 255, 0),      # 绿色 - helmet  
-            2: (0, 0, 255),      # 红色 - no_helmet
+            0: (0, 0, 255),      # 红色 - head (无安全帽，危险)
+            1: (0, 255, 0),      # 绿色 - helmet (戴安全帽，安全)
         }
         
     def predict_image(self, image_path: str, save_path: str = None, show: bool = False) -> Dict:
@@ -105,7 +109,7 @@ class SafetyHelmetInferencer:
             Dict: 推理结果
         """
         # 推理
-        results = self.model(image_path, conf=self.conf_threshold, iou=self.iou_threshold)
+        results = self.model(image_path, conf=self.conf_threshold, iou=self.iou_threshold, device=self.device)
         
         # 解析结果
         result = results[0]
@@ -250,7 +254,7 @@ class SafetyHelmetInferencer:
                 LOGGER.info(f"处理进度: {frame_count}/{total_frames}")
             
             # 推理当前帧
-            results = self.model(frame, conf=self.conf_threshold, iou=self.iou_threshold)
+            results = self.model(frame, conf=self.conf_threshold, iou=self.iou_threshold, device=self.device)
             result = results[0]
             
             # 解析检测结果
@@ -403,17 +407,23 @@ class SafetyHelmetInferencer:
 class ModelEvaluator:
     """模型评估器"""
     
-    def __init__(self, model_path: str, data_config: str):
+    def __init__(self, model_path: str, data_config: str, device: str = 'cpu'):
         """
         初始化评估器
         
         Args:
             model_path (str): 模型权重路径
             data_config (str): 数据配置文件路径
+            device (str): 评估设备选择 (cpu 或 cuda)
         """
         self.model_path = model_path
         self.data_config = data_config
+        self.device = device
         self.model = YOLO(model_path)
+        
+        # 设置设备
+        if device != 'cpu':
+            self.model.to(device)
         
         # 加载数据配置
         with open(data_config, 'r', encoding='utf-8') as f:
@@ -440,7 +450,8 @@ class ModelEvaluator:
             save_json=True,
             save_dir=save_dir,
             plots=True,
-            verbose=True
+            verbose=True,
+            device=self.device
         )
         
         # 提取评估指标
@@ -523,7 +534,7 @@ class ModelEvaluator:
 class ModelComparator:
     """模型对比器"""
     
-    def __init__(self, lw_yolo_weights: str, yolo_weights: str, data_config: str):
+    def __init__(self, lw_yolo_weights: str, yolo_weights: str, data_config: str, device: str = 'cpu'):
         """
         初始化对比器
         
@@ -531,13 +542,16 @@ class ModelComparator:
             lw_yolo_weights (str): LW-YOLOv8权重路径
             yolo_weights (str): 原始YOLOv8权重路径  
             data_config (str): 数据配置文件路径
+            device (str): 对比设备选择 (cpu 或 cuda)
         """
         self.lw_yolo_weights = lw_yolo_weights
         self.yolo_weights = yolo_weights
         self.data_config = data_config
         
-        self.lw_evaluator = ModelEvaluator(lw_yolo_weights, data_config)
-        self.yolo_evaluator = ModelEvaluator(yolo_weights, data_config)
+        self.device = device
+        
+        self.lw_evaluator = ModelEvaluator(lw_yolo_weights, data_config, device)
+        self.yolo_evaluator = ModelEvaluator(yolo_weights, data_config, device)
         
     def compare_models(self, save_dir: str = "runs/compare") -> Dict:
         """
@@ -757,6 +771,7 @@ def main():
     parser.add_argument('--output', type=str, default='runs/detect', help='输出目录')
     parser.add_argument('--conf', type=float, default=0.25, help='置信度阈值')
     parser.add_argument('--iou', type=float, default=0.45, help='NMS IoU阈值')
+    parser.add_argument('--device', type=str, choices=['cpu', 'cuda'], default='cpu', help='推理设备选择 (cpu 或 cuda)')
     parser.add_argument('--show', action='store_true', help='显示结果')
     
     # 评估参数
@@ -778,7 +793,7 @@ def main():
         if not args.lw_weights or not args.yolo_weights or not args.data:
             parser.error("对比模式需要 --lw-weights, --yolo-weights 和 --data 参数")
         
-        comparator = ModelComparator(args.lw_weights, args.yolo_weights, args.data)
+        comparator = ModelComparator(args.lw_weights, args.yolo_weights, args.data, args.device)
         comparison_results = comparator.compare_models()
         
         # 打印简要结果
@@ -798,7 +813,7 @@ def main():
         if not args.weights or not args.data:
             parser.error("评估模式需要 --weights 和 --data 参数")
         
-        evaluator = ModelEvaluator(args.weights, args.data)
+        evaluator = ModelEvaluator(args.weights, args.data, args.device)
         metrics = evaluator.evaluate()
         complexity = evaluator.analyze_model_complexity()
         
@@ -816,7 +831,7 @@ def main():
         parser.error("推理模式需要 --weights 和 --source 参数")
     
     # 创建推理器
-    inferencer = SafetyHelmetInferencer(args.weights, args.conf, args.iou)
+    inferencer = SafetyHelmetInferencer(args.weights, args.conf, args.iou, args.device)
     
     # 视频推理
     if args.video:

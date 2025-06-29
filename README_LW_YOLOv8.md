@@ -45,7 +45,7 @@ thop >= 0.1.1  # 可选，用于FLOPs计算
 
 1. **克隆项目**
 ```bash
-git clone <your-repo-url>
+git clone https://github.com/pei2333/yolov8-helmet_detection.git
 cd ultralytics
 ```
 

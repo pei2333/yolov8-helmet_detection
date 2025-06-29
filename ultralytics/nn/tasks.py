@@ -43,6 +43,7 @@ from ultralytics.nn.modules import (
     Conv,
     Conv2,
     ConvTranspose,
+    CSP_CTFN,
     Detect,
     DWConv,
     DWConvTranspose2d,
@@ -55,6 +56,7 @@ from ultralytics.nn.modules import (
     Index,
     LRPCHead,
     Pose,
+    PSCDetect,
     RepC3,
     RepConv,
     RepNCSPELAN4,
@@ -1641,6 +1643,7 @@ def parse_model(d, ch, verbose=True):
             SCDown,
             C2fCIB,
             A2C2f,
+            CSP_CTFN,
         }
     )
     repeat_modules = frozenset(  # modules with 'repeat' arguments
@@ -1660,6 +1663,7 @@ def parse_model(d, ch, verbose=True):
             C2fCIB,
             C2PSA,
             A2C2f,
+            CSP_CTFN,
         }
     )
     for i, (f, n, m, args) in enumerate(d["backbone"] + d["head"]):  # from, number, module, args
@@ -1712,12 +1716,12 @@ def parse_model(d, ch, verbose=True):
         elif m is Concat:
             c2 = sum(ch[x] for x in f)
         elif m in frozenset(
-            {Detect, WorldDetect, YOLOEDetect, Segment, YOLOESegment, Pose, OBB, ImagePoolingAttn, v10Detect}
+            {Detect, WorldDetect, YOLOEDetect, Segment, YOLOESegment, Pose, OBB, ImagePoolingAttn, v10Detect, PSCDetect}
         ):
             args.append([ch[x] for x in f])
             if m is Segment or m is YOLOESegment:
                 args[2] = make_divisible(min(args[2], max_channels) * width, 8)
-            if m in {Detect, YOLOEDetect, Segment, YOLOESegment, Pose, OBB}:
+            if m in {Detect, YOLOEDetect, Segment, YOLOESegment, Pose, OBB, PSCDetect}:
                 m.legacy = legacy
         elif m is RTDETRDecoder:  # special case, channels arg must be passed in index 1
             args.insert(1, [ch[x] for x in f])
