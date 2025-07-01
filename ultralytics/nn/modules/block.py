@@ -2060,23 +2060,41 @@ class CSP_CTFN(nn.Module):
         
         # 根据特征图层级调整CNN和Transformer的比例
         # 浅层大尺寸特征图减少Transformer部分，深层小尺寸特征图增加Transformer比例
-        self.cnn_ratio = 0.7 if c1 <= 256 else 0.5  # 根据输入通道数调整比例
+        # 为了节省显存，大幅减少Transformer的比例
+        # 对于浅层特征图，几乎只使用CNN
+        if c1 <= 64:
+            self.cnn_ratio = 1.0  # 完全使用CNN
+            num_heads = 1
+        elif c1 <= 128:
+            self.cnn_ratio = 0.9  # 90% CNN, 10% Transformer
+            num_heads = 2
+        elif c1 <= 256:
+            self.cnn_ratio = 0.8  # 80% CNN, 20% Transformer
+            num_heads = 4
+        else:
+            self.cnn_ratio = 0.7  # 70% CNN, 30% Transformer
+            num_heads = 4  # 最多4个heads
+        
         self.transformer_ratio = 1 - self.cnn_ratio
         
-        self.cnn_channels = int(self.c * self.cnn_ratio)
-        
-        # 确保transformer_channels可以被num_heads整除
-        num_heads = 8
-        transformer_channels_raw = self.c - self.cnn_channels
-        if transformer_channels_raw > 0:
-            # 调整transformer_channels使其可以被num_heads整除
-            self.transformer_channels = (transformer_channels_raw // num_heads) * num_heads
-            if self.transformer_channels == 0:
-                self.transformer_channels = num_heads  # 至少保证一个head的维度
-            # 相应调整cnn_channels
-            self.cnn_channels = self.c - self.transformer_channels
-        else:
+        # 如果完全使用CNN，则不需要Transformer
+        if self.cnn_ratio >= 1.0:
+            self.cnn_channels = 2 * self.c  # cv1输出的完整通道数
             self.transformer_channels = 0
+        else:
+            # cv1输出2*c通道，需要在这之间分配
+            total_available_channels = 2 * self.c
+            self.cnn_channels = int(total_available_channels * self.cnn_ratio)
+            transformer_channels_raw = total_available_channels - self.cnn_channels
+            if transformer_channels_raw > 0:
+                # 调整transformer_channels使其可以被num_heads整除
+                self.transformer_channels = (transformer_channels_raw // num_heads) * num_heads
+                if self.transformer_channels == 0:
+                    self.transformer_channels = num_heads  # 至少保证一个head的维度
+                # 相应调整cnn_channels
+                self.cnn_channels = total_available_channels - self.transformer_channels
+            else:
+                self.transformer_channels = 0
         
         # 输出投影层，输入通道数为拼接后的总通道数
         total_concat_channels = self.cnn_channels + self.transformer_channels
@@ -2126,31 +2144,38 @@ class CSP_CTFN(nn.Module):
         
         # 分割为CNN和Transformer两部分
         y_cnn = y[:, :self.cnn_channels]      # CNN部分 [B, cnn_c, H, W]
-        y_transformer = y[:, self.cnn_channels:self.cnn_channels + self.transformer_channels]  # Transformer部分 [B, trans_c, H, W]
+        if self.transformer_channels > 0:
+            y_transformer = y[:, self.cnn_channels:self.cnn_channels + self.transformer_channels]  # Transformer部分 [B, trans_c, H, W]
+        else:
+            y_transformer = None
         
         # CNN分支处理
         for block in self.cnn_blocks:
             y_cnn = block(y_cnn)
         
         # Transformer分支处理
-        B, C, H, W = y_transformer.shape
-        # 重塑为序列形式：[B, H*W, C]
-        y_trans_seq = y_transformer.flatten(2).transpose(1, 2)
-        
-        # 多头自注意力
-        y_trans_attn = self.mhsa(self.norm1(y_trans_seq))
-        y_trans_seq = y_trans_seq + self.layer_scale1.unsqueeze(0).unsqueeze(0) * y_trans_attn
-        
-        # 卷积门控线性单元
-        y_trans_cglu = self.cglu(y_trans_seq.transpose(1, 2).view(B, C, H, W))
-        y_trans_seq_cglu = y_trans_cglu.flatten(2).transpose(1, 2)
-        y_trans_seq = y_trans_seq + self.layer_scale2.unsqueeze(0).unsqueeze(0) * (y_trans_seq_cglu - y_trans_seq)
-        
-        # 重塑回原始形状：[B, C, H, W]
-        y_transformer = y_trans_seq.transpose(1, 2).view(B, C, H, W)
-        
-        # 拼接CNN和Transformer的输出
-        y_concat = torch.cat([y_cnn, y_transformer], dim=1)
+        if y_transformer is not None:
+            B, C, H, W = y_transformer.shape
+            # 重塑为序列形式：[B, H*W, C]
+            y_trans_seq = y_transformer.flatten(2).transpose(1, 2)
+            
+            # 多头自注意力
+            y_trans_attn = self.mhsa(self.norm1(y_trans_seq))
+            y_trans_seq = y_trans_seq + self.layer_scale1.unsqueeze(0).unsqueeze(0) * y_trans_attn
+            
+            # 卷积门控线性单元
+            y_trans_cglu = self.cglu(y_trans_seq.transpose(1, 2).view(B, C, H, W))
+            y_trans_seq_cglu = y_trans_cglu.flatten(2).transpose(1, 2)
+            y_trans_seq = y_trans_seq + self.layer_scale2.unsqueeze(0).unsqueeze(0) * (y_trans_seq_cglu - y_trans_seq)
+            
+            # 重塑回原始形状：[B, C, H, W]
+            y_transformer = y_trans_seq.transpose(1, 2).view(B, C, H, W)
+            
+            # 拼接CNN和Transformer的输出
+            y_concat = torch.cat([y_cnn, y_transformer], dim=1)
+        else:
+            # 只有CNN输出
+            y_concat = y_cnn
         
         # 输出投影
         out = self.cv2(y_concat)
@@ -2177,12 +2202,32 @@ class MultiHeadSelfAttention(nn.Module):
         
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
-        前向传播
+        前向传播 - 使用更高效的实现
         Args:
             x: [B, N, C] 其中 N = H*W
         Returns:
             out: [B, N, C]
         """
+        B, N, C = x.shape
+        
+        # 对于大的特征图，使用分块处理以节省显存
+        if N > 4096:  # 如果序列长度太长（如64x64=4096）
+            # 分块处理
+            chunk_size = 2048
+            chunks = []
+            for i in range(0, N, chunk_size):
+                end_idx = min(i + chunk_size, N)
+                chunk = x[:, i:end_idx]
+                chunk_out = self._forward_chunk(chunk)
+                chunks.append(chunk_out)
+            x = torch.cat(chunks, dim=1)
+        else:
+            x = self._forward_chunk(x)
+        
+        return x
+    
+    def _forward_chunk(self, x: torch.Tensor) -> torch.Tensor:
+        """处理单个块"""
         B, N, C = x.shape
         
         # 计算Q, K, V
