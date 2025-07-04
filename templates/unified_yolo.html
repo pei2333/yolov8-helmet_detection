@@ -1,0 +1,1639 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>统一YOLOv8 Web平台</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            color: #333;
+        }
+
+        .navbar {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            padding: 15px 0;
+            box-shadow: 0 2px 20px rgba(0, 0, 0, 0.1);
+            position: sticky;
+            top: 0;
+            z-index: 1000;
+        }
+
+        .navbar .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 0 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .navbar .logo {
+            font-size: 1.5em;
+            font-weight: bold;
+            color: #4a5568;
+        }
+
+        .navbar .nav-links {
+            display: flex;
+            gap: 20px;
+            list-style: none;
+        }
+
+        .navbar .nav-links a {
+            text-decoration: none;
+            color: #4a5568;
+            padding: 8px 16px;
+            border-radius: 8px;
+            transition: all 0.3s ease;
+            font-weight: 500;
+        }
+
+        .navbar .nav-links a:hover,
+        .navbar .nav-links a.active {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        .page-section {
+            display: none;
+        }
+
+        .page-section.active {
+            display: block;
+        }
+
+        .section-header {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            border-radius: 15px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+            text-align: center;
+        }
+
+        .section-header h1 {
+            color: #4a5568;
+            font-size: 2.2em;
+            margin-bottom: 10px;
+        }
+
+        .section-header p {
+            color: #718096;
+            font-size: 1.1em;
+        }
+
+        .card {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            border-radius: 15px;
+            padding: 25px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+            margin-bottom: 20px;
+        }
+
+        .card-title {
+            font-size: 1.4em;
+            font-weight: bold;
+            margin-bottom: 20px;
+            color: #2d3748;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .grid-2 {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+
+        .grid-3 {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 20px;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 600;
+            color: #4a5568;
+        }
+
+        .form-control {
+            width: 100%;
+            padding: 12px 15px;
+            border: 2px solid #e2e8f0;
+            border-radius: 8px;
+            font-size: 1em;
+            transition: all 0.3s ease;
+            background: #fff;
+        }
+
+        .form-control:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+
+        .btn {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 8px;
+            font-size: 1em;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            text-decoration: none;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .btn-success {
+            background: linear-gradient(135deg, #48bb78 0%, #38a169 100%);
+            color: white;
+        }
+
+        .btn-warning {
+            background: linear-gradient(135deg, #ed8936 0%, #dd6b20 100%);
+            color: white;
+        }
+
+        .btn-danger {
+            background: linear-gradient(135deg, #f56565 0%, #e53e3e 100%);
+            color: white;
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(0, 0, 0, 0.15);
+        }
+
+        .btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .status-badge {
+            display: inline-block;
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 0.9em;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+
+        .status-idle { background: #e2e8f0; color: #4a5568; }
+        .status-training { background: #c6f6d5; color: #2f855a; animation: pulse 2s infinite; }
+        .status-completed { background: #c6f6d5; color: #2f855a; }
+        .status-error { background: #fed7d7; color: #c53030; }
+        .status-stopped { background: #fbb6ce; color: #b83280; }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.7; }
+        }
+
+        .progress-bar {
+            width: 100%;
+            height: 20px;
+            background: #e2e8f0;
+            border-radius: 10px;
+            overflow: hidden;
+            position: relative;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+            width: 0%;
+            transition: width 0.5s ease;
+        }
+
+        .progress-text {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 0.8em;
+            font-weight: 600;
+            color: #4a5568;
+            z-index: 2;
+        }
+
+        .metrics-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 15px;
+            margin: 20px 0;
+        }
+
+        .metric-card {
+            background: linear-gradient(135deg, #f7fafc 0%, #edf2f7 100%);
+            padding: 15px;
+            border-radius: 10px;
+            text-align: center;
+            border: 1px solid #e2e8f0;
+        }
+
+        .metric-value {
+            font-size: 1.8em;
+            font-weight: bold;
+            color: #2d3748;
+            margin-bottom: 5px;
+        }
+
+        .metric-label {
+            font-size: 0.9em;
+            color: #718096;
+            text-transform: uppercase;
+            font-weight: 600;
+        }
+
+        .log-container {
+            background: #1a202c;
+            border-radius: 10px;
+            padding: 20px;
+            height: 400px;
+            overflow-y: auto;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9em;
+            line-height: 1.4;
+            color: #e2e8f0;
+            border: 1px solid #2d3748;
+        }
+
+        .log-line {
+            margin-bottom: 5px;
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+
+        .log-line.error { color: #f56565; }
+        .log-line.warning { color: #fbd38d; }
+        .log-line.info { color: #63b3ed; }
+
+        .chart-container {
+            position: relative;
+            height: 300px;
+            margin-top: 20px;
+        }
+
+        .connection-status {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 10px 15px;
+            border-radius: 20px;
+            font-size: 0.9em;
+            font-weight: 600;
+            z-index: 1000;
+        }
+
+        .connected { background: #c6f6d5; color: #2f855a; }
+        .disconnected { background: #fed7d7; color: #c53030; }
+
+        .image-upload-area {
+            border: 3px dashed #e2e8f0;
+            border-radius: 10px;
+            padding: 40px;
+            text-align: center;
+            background: #f7fafc;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .image-upload-area:hover {
+            border-color: #667eea;
+            background: #edf2f7;
+        }
+
+        .image-upload-area.dragover {
+            border-color: #667eea;
+            background: #e6fffa;
+        }
+
+        .inference-result {
+            margin-top: 20px;
+            padding: 20px;
+            border-radius: 10px;
+            background: #f7fafc;
+            border: 1px solid #e2e8f0;
+        }
+
+        .detection-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px;
+            margin: 5px 0;
+            background: white;
+            border-radius: 8px;
+            border-left: 4px solid #667eea;
+        }
+
+        .detection-class {
+            font-weight: bold;
+            color: #2d3748;
+        }
+
+        .detection-conf {
+            background: #667eea;
+            color: white;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 0.8em;
+        }
+
+        .model-comparison-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+
+        .model-comparison-table th,
+        .model-comparison-table td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid #e2e8f0;
+        }
+
+        .model-comparison-table th {
+            background: #f7fafc;
+            font-weight: 600;
+        }
+
+        .model-comparison-table tr:hover {
+            background: #f7fafc;
+        }
+
+        @media (max-width: 768px) {
+            .grid-2, .grid-3 {
+                grid-template-columns: 1fr;
+            }
+            
+            .navbar .nav-links {
+                flex-direction: column;
+                gap: 10px;
+            }
+            
+            .metrics-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="connection-status" id="connectionStatus">
+        <i class="fas fa-circle"></i> 连接中...
+    </div>
+
+    <nav class="navbar">
+        <div class="container">
+            <div class="logo">
+                <i class="fas fa-robot"></i> 统一YOLOv8平台
+            </div>
+            <ul class="nav-links">
+                <li><a href="#" class="nav-link active" data-page="overview"><i class="fas fa-home"></i> 概览</a></li>
+                <li><a href="#" class="nav-link" data-page="training"><i class="fas fa-chart-line"></i> 训练</a></li>
+                <li><a href="#" class="nav-link" data-page="inference"><i class="fas fa-search"></i> 推理</a></li>
+                <li><a href="#" class="nav-link" data-page="models"><i class="fas fa-database"></i> 模型管理</a></li>
+            </ul>
+        </div>
+    </nav>
+
+    <div class="container">
+        <!-- 概览页面 -->
+        <div class="page-section active" id="overview-page">
+            <div class="section-header">
+                <h1><i class="fas fa-dashboard"></i> 平台概览</h1>
+                <p>YOLOv8轻量化安全帽检测模型 - 训练、推理、管理一体化平台</p>
+            </div>
+
+            <div class="grid-3">
+                <div class="card">
+                    <div class="card-title">
+                        <i class="fas fa-chart-line"></i> 训练状态
+                    </div>
+                    <div style="text-align: center;">
+                        <div class="metric-value" id="overviewTrainingStatus">空闲</div>
+                        <div class="metric-label">当前状态</div>
+                        <div style="margin-top: 15px;">
+                            <button class="btn btn-primary" onclick="switchPage('training')">
+                                <i class="fas fa-play"></i> 开始训练
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-title">
+                        <i class="fas fa-search"></i> 推理服务
+                    </div>
+                    <div style="text-align: center;">
+                        <div class="metric-value" id="overviewInferenceModels">0</div>
+                        <div class="metric-label">已加载模型</div>
+                        <div style="margin-top: 15px;">
+                            <button class="btn btn-success" onclick="switchPage('inference')">
+                                <i class="fas fa-image"></i> 图像推理
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-title">
+                        <i class="fas fa-database"></i> 模型库
+                    </div>
+                    <div style="text-align: center;">
+                        <div class="metric-value" id="overviewTotalModels">0</div>
+                        <div class="metric-label">训练完成</div>
+                        <div style="margin-top: 15px;">
+                            <button class="btn btn-warning" onclick="switchPage('models')">
+                                <i class="fas fa-cog"></i> 管理模型
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-title">
+                    <i class="fas fa-chart-area"></i> 系统统计
+                </div>
+                <div class="metrics-grid">
+                    <div class="metric-card">
+                        <div class="metric-value" id="totalTrainingTime">0h</div>
+                        <div class="metric-label">总训练时长</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-value" id="bestMAP">0.000</div>
+                        <div class="metric-label">最佳mAP50</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-value" id="totalInferences">0</div>
+                        <div class="metric-label">推理次数</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-value" id="avgAccuracy">0%</div>
+                        <div class="metric-label">平均准确率</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 训练页面 -->
+        <div class="page-section" id="training-page">
+            <div class="section-header">
+                <h1><i class="fas fa-chart-line"></i> 模型训练</h1>
+                <p>配置和监控YOLOv8模型训练过程</p>
+            </div>
+
+            <div class="grid-2">
+                <div class="card">
+                    <div class="card-title">
+                        <i class="fas fa-cogs"></i> 训练配置
+                    </div>
+                    
+                    <form id="trainingForm">
+                        <div class="form-group">
+                            <label for="modelSelect">选择模型:</label>
+                            <select class="form-control" id="modelSelect" name="model">
+                                <option value="">加载中...</option>
+                            </select>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label for="datasetSelect">选择数据集:</label>
+                            <select class="form-control" id="datasetSelect" name="dataset">
+                                <option value="">加载中...</option>
+                            </select>
+                        </div>
+                        
+                        <div class="grid-2">
+                            <div class="form-group">
+                                <label for="epochsInput">训练轮数:</label>
+                                <input type="number" class="form-control" id="epochsInput" name="epochs" value="100" min="1" max="1000">
+                            </div>
+                            <div class="form-group">
+                                <label for="batchSizeInput">批次大小:</label>
+                                <input type="number" class="form-control" id="batchSizeInput" name="batch_size" value="8" min="1" max="64">
+                            </div>
+                        </div>
+                        
+                        <div style="display: flex; gap: 10px;">
+                            <button type="submit" class="btn btn-primary" id="startTrainingBtn">
+                                <i class="fas fa-play"></i> 开始训练
+                            </button>
+                            <button type="button" class="btn btn-danger" id="stopTrainingBtn" disabled>
+                                <i class="fas fa-stop"></i> 停止训练
+                            </button>
+                        </div>
+                    </form>
+                </div>
+
+                <div class="card">
+                    <div class="card-title">
+                        <i class="fas fa-info-circle"></i> 训练状态
+                    </div>
+                    
+                    <div style="margin-bottom: 15px;">
+                        <strong>状态:</strong> <span class="status-badge status-idle" id="trainingStatusBadge">空闲</span>
+                    </div>
+                    
+                    <div style="margin-bottom: 15px;">
+                        <strong>当前模型:</strong> <span id="currentTrainingModel">无</span>
+                    </div>
+                    
+                    <div class="progress-container" style="margin-bottom: 15px;">
+                        <strong>训练进度:</strong>
+                        <div class="progress-bar">
+                            <div class="progress-fill" id="trainingProgressFill"></div>
+                            <div class="progress-text" id="trainingProgressText">0%</div>
+                        </div>
+                        <small id="trainingEpochInfo">Epoch 0/0</small>
+                    </div>
+
+                    <div class="metrics-grid">
+                        <div class="metric-card">
+                            <div class="metric-value" id="trainingMapValue">-</div>
+                            <div class="metric-label">mAP50</div>
+                        </div>
+                        <div class="metric-card">
+                            <div class="metric-value" id="trainingLossValue">-</div>
+                            <div class="metric-label">Loss</div>
+                        </div>
+                        <div class="metric-card">
+                            <div class="metric-value" id="trainingTimeValue">-</div>
+                            <div class="metric-label">用时</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-title">
+                    <i class="fas fa-chart-area"></i> 训练指标图表
+                </div>
+                <div class="chart-container">
+                    <canvas id="trainingMetricsChart"></canvas>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-title">
+                    <i class="fas fa-terminal"></i> 实时训练日志
+                </div>
+                <div class="log-container" id="trainingLogContainer">
+                    <div class="log-line">等待训练开始...</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 推理页面 -->
+        <div class="page-section" id="inference-page">
+            <div class="section-header">
+                <h1><i class="fas fa-search"></i> 模型推理</h1>
+                <p>上传图像进行安全帽检测推理测试</p>
+            </div>
+
+            <div class="grid-2">
+                <div class="card">
+                    <div class="card-title">
+                        <i class="fas fa-upload"></i> 图像上传
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="inferenceModelSelect">选择推理模型:</label>
+                        <select class="form-control" id="inferenceModelSelect">
+                            <option value="">请先加载模型</option>
+                        </select>
+                        <button class="btn btn-primary" style="margin-top: 10px;" onclick="loadInferenceModels()">
+                            <i class="fas fa-refresh"></i> 刷新模型列表
+                        </button>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="confThresholdInput">置信度阈值:</label>
+                        <input type="range" class="form-control" id="confThresholdInput" min="0.1" max="1.0" step="0.1" value="0.5">
+                        <small>当前值: <span id="confThresholdValue">0.5</span></small>
+                    </div>
+                    
+                    <div class="image-upload-area" id="imageUploadArea">
+                        <i class="fas fa-cloud-upload-alt" style="font-size: 3em; color: #cbd5e0; margin-bottom: 15px;"></i>
+                        <p style="margin-bottom: 10px;">点击或拖拽图像到此处</p>
+                        <p style="color: #718096; font-size: 0.9em;">支持 JPG, PNG, BMP 格式</p>
+                        <input type="file" id="imageInput" accept="image/*" style="display: none;">
+                    </div>
+
+                    <div style="margin-top: 15px; text-align: center;">
+                        <button class="btn btn-success" id="inferenceBtn" disabled>
+                            <i class="fas fa-play"></i> 开始推理
+                        </button>
+                        <button class="btn btn-warning" id="clearInferenceBtn">
+                            <i class="fas fa-trash"></i> 清空结果
+                        </button>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-title">
+                        <i class="fas fa-image"></i> 推理结果
+                    </div>
+                    
+                    <div id="inferenceResultContainer">
+                        <div style="text-align: center; color: #718096; padding: 40px;">
+                            <i class="fas fa-image" style="font-size: 3em; margin-bottom: 15px;"></i>
+                            <p>推理结果将在此显示</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card" id="detectionSummaryCard" style="display: none;">
+                <div class="card-title">
+                    <i class="fas fa-list"></i> 检测详情
+                </div>
+                
+                <div class="grid-2">
+                    <div class="metrics-grid">
+                        <div class="metric-card">
+                            <div class="metric-value" id="totalDetections">0</div>
+                            <div class="metric-label">总检测数</div>
+                        </div>
+                        <div class="metric-card">
+                            <div class="metric-value" id="headCount">0</div>
+                            <div class="metric-label">未戴安全帽</div>
+                        </div>
+                        <div class="metric-card">
+                            <div class="metric-value" id="helmetCount">0</div>
+                            <div class="metric-label">已戴安全帽</div>
+                        </div>
+                        <div class="metric-card">
+                            <div class="metric-value" id="safetyRate">0%</div>
+                            <div class="metric-label">安全率</div>
+                        </div>
+                    </div>
+                    
+                    <div>
+                        <h4 style="margin-bottom: 15px;">检测列表:</h4>
+                        <div id="detectionsList">
+                            <!-- 检测结果列表 -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 模型管理页面 -->
+        <div class="page-section" id="models-page">
+            <div class="section-header">
+                <h1><i class="fas fa-database"></i> 模型管理</h1>
+                <p>管理、对比和下载训练完成的模型</p>
+            </div>
+
+            <div class="card">
+                <div class="card-title">
+                    <i class="fas fa-list"></i> 训练历史
+                    <div style="margin-left: auto;">
+                        <button class="btn btn-primary" onclick="loadTrainingRuns()">
+                            <i class="fas fa-refresh"></i> 刷新
+                        </button>
+                        <button class="btn btn-success" id="compareSelectedBtn" disabled>
+                            <i class="fas fa-balance-scale"></i> 对比选中
+                        </button>
+                        <button class="btn btn-warning" id="exportSelectedBtn" disabled>
+                            <i class="fas fa-download"></i> 导出选中
+                        </button>
+                    </div>
+                </div>
+                
+                <div id="trainingRunsTable">
+                    <!-- 训练历史表格 -->
+                </div>
+            </div>
+
+            <div class="card" id="modelComparisonCard" style="display: none;">
+                <div class="card-title">
+                    <i class="fas fa-balance-scale"></i> 模型对比结果
+                </div>
+                
+                <table class="model-comparison-table" id="comparisonTable">
+                    <thead>
+                        <tr>
+                            <th>模型名称</th>
+                            <th>mAP50</th>
+                            <th>mAP50-95</th>
+                            <th>精确率</th>
+                            <th>召回率</th>
+                            <th>模型大小</th>
+                            <th>训练轮数</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <!-- 对比数据 -->
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="card">
+                <div class="card-title">
+                    <i class="fas fa-cog"></i> 推理模型管理
+                </div>
+                
+                <div class="grid-2">
+                    <div>
+                        <h4 style="margin-bottom: 15px;">加载新模型:</h4>
+                        <div class="form-group">
+                            <label>模型路径:</label>
+                            <input type="text" class="form-control" id="newModelPath" placeholder="例: runs/train/exp/weights/best.pt">
+                        </div>
+                        <div class="form-group">
+                            <label>模型名称:</label>
+                            <input type="text" class="form-control" id="newModelName" placeholder="可选，默认使用文件名">
+                        </div>
+                        <button class="btn btn-primary" onclick="loadNewInferenceModel()">
+                            <i class="fas fa-plus"></i> 加载模型
+                        </button>
+                    </div>
+                    
+                    <div>
+                        <h4 style="margin-bottom: 15px;">已加载模型:</h4>
+                        <div id="loadedModelsList">
+                            <!-- 已加载模型列表 -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // 全局变量
+        const socket = io();
+        let trainingChart;
+        let selectedRuns = new Set();
+        let currentUploadedImage = null;
+        let totalInferenceCount = 0;
+
+        // DOM元素映射
+        const elements = {
+            // 导航和状态
+            connectionStatus: document.getElementById('connectionStatus'),
+            
+            // 概览页面
+            overviewTrainingStatus: document.getElementById('overviewTrainingStatus'),
+            overviewInferenceModels: document.getElementById('overviewInferenceModels'),
+            overviewTotalModels: document.getElementById('overviewTotalModels'),
+            
+            // 训练页面
+            modelSelect: document.getElementById('modelSelect'),
+            datasetSelect: document.getElementById('datasetSelect'),
+            epochsInput: document.getElementById('epochsInput'),
+            batchSizeInput: document.getElementById('batchSizeInput'),
+            startTrainingBtn: document.getElementById('startTrainingBtn'),
+            stopTrainingBtn: document.getElementById('stopTrainingBtn'),
+            trainingStatusBadge: document.getElementById('trainingStatusBadge'),
+            currentTrainingModel: document.getElementById('currentTrainingModel'),
+            trainingProgressFill: document.getElementById('trainingProgressFill'),
+            trainingProgressText: document.getElementById('trainingProgressText'),
+            trainingEpochInfo: document.getElementById('trainingEpochInfo'),
+            trainingMapValue: document.getElementById('trainingMapValue'),
+            trainingLossValue: document.getElementById('trainingLossValue'),
+            trainingTimeValue: document.getElementById('trainingTimeValue'),
+            trainingLogContainer: document.getElementById('trainingLogContainer'),
+            trainingForm: document.getElementById('trainingForm'),
+            
+            // 推理页面
+            inferenceModelSelect: document.getElementById('inferenceModelSelect'),
+            confThresholdInput: document.getElementById('confThresholdInput'),
+            confThresholdValue: document.getElementById('confThresholdValue'),
+            imageUploadArea: document.getElementById('imageUploadArea'),
+            imageInput: document.getElementById('imageInput'),
+            inferenceBtn: document.getElementById('inferenceBtn'),
+            clearInferenceBtn: document.getElementById('clearInferenceBtn'),
+            inferenceResultContainer: document.getElementById('inferenceResultContainer'),
+            detectionSummaryCard: document.getElementById('detectionSummaryCard'),
+            totalDetections: document.getElementById('totalDetections'),
+            headCount: document.getElementById('headCount'),
+            helmetCount: document.getElementById('helmetCount'),
+            safetyRate: document.getElementById('safetyRate'),
+            detectionsList: document.getElementById('detectionsList'),
+            
+            // 模型管理页面
+            trainingRunsTable: document.getElementById('trainingRunsTable'),
+            compareSelectedBtn: document.getElementById('compareSelectedBtn'),
+            exportSelectedBtn: document.getElementById('exportSelectedBtn'),
+            modelComparisonCard: document.getElementById('modelComparisonCard'),
+            comparisonTable: document.getElementById('comparisonTable'),
+            newModelPath: document.getElementById('newModelPath'),
+            newModelName: document.getElementById('newModelName'),
+            loadedModelsList: document.getElementById('loadedModelsList')
+        };
+
+        // ============= 页面导航 =============
+        
+        function switchPage(pageName) {
+            // 隐藏所有页面
+            document.querySelectorAll('.page-section').forEach(section => {
+                section.classList.remove('active');
+            });
+            
+            // 更新导航链接
+            document.querySelectorAll('.nav-link').forEach(link => {
+                link.classList.remove('active');
+            });
+            
+            // 显示选中页面
+            const targetPage = document.getElementById(pageName + '-page');
+            if (targetPage) {
+                targetPage.classList.add('active');
+            }
+            
+            // 激活对应导航链接
+            const targetLink = document.querySelector(`[data-page="${pageName}"]`);
+            if (targetLink) {
+                targetLink.classList.add('active');
+            }
+            
+            // 页面特定初始化
+            if (pageName === 'training') {
+                loadTrainingData();
+            } else if (pageName === 'inference') {
+                loadInferenceModels();
+            } else if (pageName === 'models') {
+                loadTrainingRuns();
+                loadLoadedModels();
+            }
+        }
+
+        // ============= Socket.IO 事件处理 =============
+        
+        socket.on('connect', () => {
+            updateConnectionStatus(true);
+            socket.emit('request_logs');
+        });
+
+        socket.on('disconnect', () => {
+            updateConnectionStatus(false);
+        });
+
+        socket.on('training_status', (data) => {
+            updateTrainingStatus(data);
+        });
+
+        socket.on('training_log', (data) => {
+            addTrainingLog(data.log);
+        });
+
+        socket.on('training_progress', (data) => {
+            updateTrainingProgress(data);
+        });
+
+        socket.on('metrics_update', (data) => {
+            updateTrainingMetrics(data);
+        });
+
+        socket.on('training_completed', (data) => {
+            addTrainingLog(`✅ ${data.message}`);
+            loadTrainingRuns(); // 刷新训练历史
+        });
+
+        socket.on('training_stopped', (data) => {
+            addTrainingLog(`⛔ ${data.message}`);
+        });
+
+        socket.on('training_error', (data) => {
+            addTrainingLog(`❌ 训练错误: ${data.error}`);
+        });
+
+        // ============= 工具函数 =============
+        
+        function updateConnectionStatus(connected) {
+            if (connected) {
+                elements.connectionStatus.className = 'connection-status connected';
+                elements.connectionStatus.innerHTML = '<i class="fas fa-circle"></i> 已连接';
+            } else {
+                elements.connectionStatus.className = 'connection-status disconnected';
+                elements.connectionStatus.innerHTML = '<i class="fas fa-circle"></i> 连接断开';
+            }
+        }
+
+        function updateTrainingStatus(data) {
+            const statusMap = {
+                'idle': { text: '空闲', class: 'status-idle' },
+                'training': { text: '训练中', class: 'status-training' },
+                'completed': { text: '已完成', class: 'status-completed' },
+                'error': { text: '错误', class: 'status-error' },
+                'stopped': { text: '已停止', class: 'status-stopped' }
+            };
+
+            const statusInfo = statusMap[data.status] || statusMap['idle'];
+            
+            // 更新训练页面状态
+            if (elements.trainingStatusBadge) {
+                elements.trainingStatusBadge.textContent = statusInfo.text;
+                elements.trainingStatusBadge.className = `status-badge ${statusInfo.class}`;
+            }
+            
+            // 更新概览页面状态
+            if (elements.overviewTrainingStatus) {
+                elements.overviewTrainingStatus.textContent = statusInfo.text;
+            }
+
+            const isTraining = data.status === 'training';
+            if (elements.startTrainingBtn) elements.startTrainingBtn.disabled = isTraining;
+            if (elements.stopTrainingBtn) elements.stopTrainingBtn.disabled = !isTraining;
+
+            if (data.model && elements.currentTrainingModel) {
+                elements.currentTrainingModel.textContent = data.model;
+            }
+
+            // 更新时间显示
+            if (data.start_time && isTraining) {
+                updateTrainingTime(data.start_time);
+            }
+        }
+
+        function updateTrainingProgress(data) {
+            const progress = data.progress;
+            if (elements.trainingProgressFill) {
+                elements.trainingProgressFill.style.width = `${progress}%`;
+            }
+            if (elements.trainingProgressText) {
+                elements.trainingProgressText.textContent = `${Math.round(progress)}%`;
+            }
+            if (elements.trainingEpochInfo) {
+                elements.trainingEpochInfo.textContent = `Epoch ${data.epoch}/${data.total_epochs}`;
+            }
+
+            // 更新图表
+            updateTrainingChart(data.epoch);
+        }
+
+        function updateTrainingMetrics(data) {
+            if (data.mAP50 !== undefined && elements.trainingMapValue) {
+                elements.trainingMapValue.textContent = data.mAP50.toFixed(3);
+            }
+            
+            if (data.loss !== undefined && elements.trainingLossValue) {
+                elements.trainingLossValue.textContent = data.loss.toFixed(4);
+            }
+
+            // 更新图表数据
+            if (trainingChart && data.mAP50 !== undefined) {
+                const chartData = trainingChart.data;
+                if (chartData.datasets[0].data.length > 0) {
+                    chartData.datasets[0].data[chartData.datasets[0].data.length - 1] = data.mAP50;
+                }
+                if (data.loss !== undefined && chartData.datasets[1].data.length > 0) {
+                    chartData.datasets[1].data[chartData.datasets[1].data.length - 1] = data.loss;
+                }
+                trainingChart.update();
+            }
+        }
+
+        function addTrainingLog(message) {
+            if (!elements.trainingLogContainer) return;
+            
+            const logLine = document.createElement('div');
+            logLine.className = 'log-line';
+            
+            if (message.toLowerCase().includes('error')) {
+                logLine.classList.add('error');
+            } else if (message.toLowerCase().includes('warning')) {
+                logLine.classList.add('warning');
+            } else if (message.toLowerCase().includes('info')) {
+                logLine.classList.add('info');
+            }
+            
+            logLine.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+            elements.trainingLogContainer.appendChild(logLine);
+            
+            elements.trainingLogContainer.scrollTop = elements.trainingLogContainer.scrollHeight;
+            
+            while (elements.trainingLogContainer.children.length > 500) {
+                elements.trainingLogContainer.removeChild(elements.trainingLogContainer.firstChild);
+            }
+        }
+
+        function updateTrainingTime(startTime) {
+            const startDate = new Date(startTime);
+            setInterval(() => {
+                const now = new Date();
+                const elapsed = Math.floor((now - startDate) / 1000);
+                const hours = Math.floor(elapsed / 3600);
+                const minutes = Math.floor((elapsed % 3600) / 60);
+                const seconds = elapsed % 60;
+                
+                if (elements.trainingTimeValue) {
+                    elements.trainingTimeValue.textContent = 
+                        `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+                }
+            }, 1000);
+        }
+
+        // ============= 训练功能 =============
+        
+        async function loadTrainingData() {
+            await Promise.all([
+                loadModels(),
+                loadDatasets()
+            ]);
+        }
+
+        async function loadModels() {
+            try {
+                const response = await fetch('/api/models');
+                const models = await response.json();
+                
+                if (elements.modelSelect) {
+                    elements.modelSelect.innerHTML = '';
+                    models.forEach(model => {
+                        const option = document.createElement('option');
+                        option.value = model.id;
+                        option.textContent = `${model.name} - ${model.description}`;
+                        elements.modelSelect.appendChild(option);
+                    });
+                }
+            } catch (error) {
+                console.error('加载模型列表失败:', error);
+            }
+        }
+
+        async function loadDatasets() {
+            try {
+                const response = await fetch('/api/datasets');
+                const datasets = await response.json();
+                
+                if (elements.datasetSelect) {
+                    elements.datasetSelect.innerHTML = '';
+                    datasets.forEach(dataset => {
+                        const option = document.createElement('option');
+                        option.value = dataset.path;
+                        option.textContent = `${dataset.name} (${dataset.nc} classes)`;
+                        elements.datasetSelect.appendChild(option);
+                    });
+                }
+            } catch (error) {
+                console.error('加载数据集列表失败:', error);
+            }
+        }
+
+        function initTrainingChart() {
+            if (!document.getElementById('trainingMetricsChart')) return;
+            
+            const ctx = document.getElementById('trainingMetricsChart').getContext('2d');
+            trainingChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: [],
+                    datasets: [
+                        {
+                            label: 'mAP50',
+                            data: [],
+                            borderColor: '#667eea',
+                            backgroundColor: 'rgba(102, 126, 234, 0.1)',
+                            tension: 0.4
+                        },
+                        {
+                            label: 'Loss',
+                            data: [],
+                            borderColor: '#f56565',
+                            backgroundColor: 'rgba(245, 101, 101, 0.1)',
+                            tension: 0.4,
+                            yAxisID: 'y1'
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: { title: { display: true, text: 'mAP50' } },
+                        y1: { 
+                            type: 'linear',
+                            position: 'right',
+                            title: { display: true, text: 'Loss' },
+                            grid: { drawOnChartArea: false }
+                        }
+                    }
+                }
+            });
+        }
+
+        function updateTrainingChart(epoch) {
+            if (!trainingChart) return;
+            
+            const chartData = trainingChart.data;
+            if (chartData.labels.length === 0 || chartData.labels[chartData.labels.length - 1] !== epoch) {
+                chartData.labels.push(epoch);
+                chartData.datasets.forEach(dataset => dataset.data.push(0));
+                
+                if (chartData.labels.length > 50) {
+                    chartData.labels.shift();
+                    chartData.datasets.forEach(dataset => dataset.data.shift());
+                }
+                trainingChart.update();
+            }
+        }
+
+        // ============= 推理功能 =============
+        
+        async function loadInferenceModels() {
+            try {
+                const response = await fetch('/api/inference/models');
+                const models = await response.json();
+                
+                if (elements.inferenceModelSelect) {
+                    elements.inferenceModelSelect.innerHTML = '<option value="">请选择模型</option>';
+                    models.forEach(model => {
+                        const option = document.createElement('option');
+                        option.value = model.name;
+                        option.textContent = `${model.name} (${model.file_size_mb || 'Unknown'}MB)`;
+                        if (model.is_current) {
+                            option.selected = true;
+                        }
+                        elements.inferenceModelSelect.appendChild(option);
+                    });
+                }
+                
+                // 更新概览页面
+                if (elements.overviewInferenceModels) {
+                    elements.overviewInferenceModels.textContent = models.length;
+                }
+            } catch (error) {
+                console.error('加载推理模型失败:', error);
+            }
+        }
+
+        async function setInferenceModel(modelName) {
+            try {
+                const response = await fetch('/api/inference/set_model', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ model_name: modelName })
+                });
+                
+                const result = await response.json();
+                if (!result.success) {
+                    alert(result.message);
+                }
+            } catch (error) {
+                console.error('设置推理模型失败:', error);
+            }
+        }
+
+        async function performInference() {
+            if (!currentUploadedImage) {
+                alert('请先上传图像');
+                return;
+            }
+
+            const modelName = elements.inferenceModelSelect.value;
+            if (!modelName) {
+                alert('请先选择推理模型');
+                return;
+            }
+
+            try {
+                elements.inferenceBtn.disabled = true;
+                elements.inferenceBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 推理中...';
+
+                // 设置当前模型
+                await setInferenceModel(modelName);
+
+                const formData = new FormData();
+                formData.append('image', currentUploadedImage);
+                formData.append('conf_threshold', elements.confThresholdInput.value);
+
+                const response = await fetch('/api/inference/predict', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const result = await response.json();
+                
+                if (result.success) {
+                    displayInferenceResult(result.result);
+                    totalInferenceCount++;
+                } else {
+                    alert(`推理失败: ${result.message}`);
+                }
+            } catch (error) {
+                console.error('推理失败:', error);
+                alert(`推理失败: ${error.message}`);
+            } finally {
+                elements.inferenceBtn.disabled = false;
+                elements.inferenceBtn.innerHTML = '<i class="fas fa-play"></i> 开始推理';
+            }
+        }
+
+        function displayInferenceResult(result) {
+            // 显示推理图像
+            elements.inferenceResultContainer.innerHTML = `
+                <img src="${result.image}" style="max-width: 100%; border-radius: 8px;" alt="推理结果">
+            `;
+
+            // 显示检测统计
+            elements.detectionSummaryCard.style.display = 'block';
+            elements.totalDetections.textContent = result.summary.total_detections;
+            elements.headCount.textContent = result.summary.head_count;
+            elements.helmetCount.textContent = result.summary.helmet_count;
+            elements.safetyRate.textContent = Math.round(result.summary.safety_rate) + '%';
+
+            // 显示检测列表
+            elements.detectionsList.innerHTML = '';
+            result.detections.forEach((detection, index) => {
+                const detectionElement = document.createElement('div');
+                detectionElement.className = 'detection-item';
+                detectionElement.innerHTML = `
+                    <div>
+                        <span class="detection-class">${detection.class === 'head' ? '未戴安全帽' : '已戴安全帽'}</span>
+                        <small style="color: #718096; margin-left: 10px;">
+                            位置: (${Math.round(detection.bbox[0])}, ${Math.round(detection.bbox[1])})
+                        </small>
+                    </div>
+                    <span class="detection-conf">${Math.round(detection.confidence * 100)}%</span>
+                `;
+                elements.detectionsList.appendChild(detectionElement);
+            });
+        }
+
+        function clearInferenceResult() {
+            elements.inferenceResultContainer.innerHTML = `
+                <div style="text-align: center; color: #718096; padding: 40px;">
+                    <i class="fas fa-image" style="font-size: 3em; margin-bottom: 15px;"></i>
+                    <p>推理结果将在此显示</p>
+                </div>
+            `;
+            elements.detectionSummaryCard.style.display = 'none';
+            currentUploadedImage = null;
+            elements.inferenceBtn.disabled = true;
+        }
+
+        // ============= 模型管理功能 =============
+        
+        async function loadTrainingRuns() {
+            try {
+                const response = await fetch('/api/runs');
+                const runs = await response.json();
+                
+                // 更新概览页面
+                if (elements.overviewTotalModels) {
+                    elements.overviewTotalModels.textContent = runs.length;
+                }
+
+                if (!elements.trainingRunsTable) return;
+
+                if (runs.length === 0) {
+                    elements.trainingRunsTable.innerHTML = '<p style="text-align: center; color: #718096;">暂无训练历史</p>';
+                    return;
+                }
+
+                let tableHTML = `
+                    <table class="model-comparison-table">
+                        <thead>
+                            <tr>
+                                <th><input type="checkbox" id="selectAllRuns"></th>
+                                <th>名称</th>
+                                <th>创建时间</th>
+                                <th>权重</th>
+                                <th>结果</th>
+                                <th>操作</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                `;
+
+                runs.forEach(run => {
+                    tableHTML += `
+                        <tr>
+                            <td><input type="checkbox" class="run-checkbox" value="${run.name}"></td>
+                            <td><strong>${run.name}</strong></td>
+                            <td>${new Date(run.created * 1000).toLocaleString()}</td>
+                            <td>${run.has_weights ? '✅' : '❌'}</td>
+                            <td>${run.has_results ? '✅' : '❌'}</td>
+                            <td>
+                                ${run.has_weights ? `<button class="btn btn-primary" onclick="loadModelForInference('${run.weights_path}', '${run.name}')">加载推理</button>` : ''}
+                                ${run.has_weights ? `<a href="/api/models/download/${run.name}" class="btn btn-success">下载</a>` : ''}
+                            </td>
+                        </tr>
+                    `;
+                });
+
+                tableHTML += '</tbody></table>';
+                elements.trainingRunsTable.innerHTML = tableHTML;
+
+                // 绑定事件
+                document.getElementById('selectAllRuns').addEventListener('change', function() {
+                    const checkboxes = document.querySelectorAll('.run-checkbox');
+                    checkboxes.forEach(cb => cb.checked = this.checked);
+                    updateSelectedRuns();
+                });
+
+                document.querySelectorAll('.run-checkbox').forEach(cb => {
+                    cb.addEventListener('change', updateSelectedRuns);
+                });
+
+            } catch (error) {
+                console.error('加载训练历史失败:', error);
+            }
+        }
+
+        function updateSelectedRuns() {
+            selectedRuns.clear();
+            document.querySelectorAll('.run-checkbox:checked').forEach(cb => {
+                selectedRuns.add(cb.value);
+            });
+
+            const hasSelected = selectedRuns.size > 0;
+            if (elements.compareSelectedBtn) elements.compareSelectedBtn.disabled = !hasSelected;
+            if (elements.exportSelectedBtn) elements.exportSelectedBtn.disabled = !hasSelected;
+        }
+
+        async function compareSelectedModels() {
+            if (selectedRuns.size === 0) return;
+
+            try {
+                const response = await fetch('/api/models/compare', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ runs: Array.from(selectedRuns) })
+                });
+
+                const comparison = await response.json();
+                displayModelComparison(comparison);
+            } catch (error) {
+                console.error('模型对比失败:', error);
+            }
+        }
+
+        function displayModelComparison(comparison) {
+            elements.modelComparisonCard.style.display = 'block';
+            
+            const tbody = elements.comparisonTable.querySelector('tbody');
+            tbody.innerHTML = '';
+
+            comparison.forEach(model => {
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td><strong>${model.name}</strong></td>
+                    <td>${model.metrics.mAP50?.toFixed(3) || '-'}</td>
+                    <td>${model.metrics['mAP50-95']?.toFixed(3) || '-'}</td>
+                    <td>${model.metrics.precision?.toFixed(3) || '-'}</td>
+                    <td>${model.metrics.recall?.toFixed(3) || '-'}</td>
+                    <td>${model.model_size_mb}MB</td>
+                    <td>${model.metrics.final_epoch || '-'}</td>
+                `;
+                tbody.appendChild(row);
+            });
+        }
+
+        async function loadModelForInference(weightsPath, modelName) {
+            try {
+                const response = await fetch('/api/inference/load_model', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 
+                        model_path: weightsPath, 
+                        model_name: modelName 
+                    })
+                });
+
+                const result = await response.json();
+                alert(result.message);
+                
+                if (result.success) {
+                    loadInferenceModels();
+                }
+            } catch (error) {
+                console.error('加载模型失败:', error);
+                alert('加载模型失败');
+            }
+        }
+
+        async function loadNewInferenceModel() {
+            const modelPath = elements.newModelPath.value.trim();
+            const modelName = elements.newModelName.value.trim();
+
+            if (!modelPath) {
+                alert('请输入模型路径');
+                return;
+            }
+
+            await loadModelForInference(modelPath, modelName || null);
+            
+            // 清空输入框
+            elements.newModelPath.value = '';
+            elements.newModelName.value = '';
+        }
+
+        async function loadLoadedModels() {
+            try {
+                const response = await fetch('/api/inference/models');
+                const models = await response.json();
+                
+                if (elements.loadedModelsList) {
+                    if (models.length === 0) {
+                        elements.loadedModelsList.innerHTML = '<p style="color: #718096;">暂无已加载模型</p>';
+                        return;
+                    }
+
+                    let modelsHTML = '';
+                    models.forEach(model => {
+                        modelsHTML += `
+                            <div style="background: #f7fafc; padding: 10px; border-radius: 8px; margin-bottom: 10px;">
+                                <strong>${model.name}</strong>
+                                <small style="color: #718096; display: block;">
+                                    大小: ${model.file_size_mb || 'Unknown'}MB | 
+                                    设备: ${model.device || 'Unknown'}
+                                </small>
+                                ${model.is_current ? '<span style="color: #2f855a;">当前使用</span>' : ''}
+                            </div>
+                        `;
+                    });
+                    elements.loadedModelsList.innerHTML = modelsHTML;
+                }
+            } catch (error) {
+                console.error('加载已加载模型列表失败:', error);
+            }
+        }
+
+        // ============= 事件监听器 =============
+        
+        document.addEventListener('DOMContentLoaded', function() {
+            // 导航事件
+            document.querySelectorAll('.nav-link').forEach(link => {
+                link.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    const page = this.getAttribute('data-page');
+                    switchPage(page);
+                });
+            });
+
+            // 训练表单提交
+            if (elements.trainingForm) {
+                elements.trainingForm.addEventListener('submit', async function(e) {
+                    e.preventDefault();
+                    
+                    const formData = new FormData(e.target);
+                    const data = {
+                        model: formData.get('model'),
+                        dataset: formData.get('dataset'),
+                        epochs: parseInt(formData.get('epochs')),
+                        batch_size: parseInt(formData.get('batch_size'))
+                    };
+
+                    try {
+                        const response = await fetch('/api/start_training', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(data)
+                        });
+
+                        const result = await response.json();
+                        addTrainingLog(`${result.success ? '🚀' : '❌'} ${result.message}`);
+                    } catch (error) {
+                        addTrainingLog(`❌ 启动训练失败: ${error.message}`);
+                    }
+                });
+            }
+
+            // 停止训练
+            if (elements.stopTrainingBtn) {
+                elements.stopTrainingBtn.addEventListener('click', async function() {
+                    try {
+                        const response = await fetch('/api/stop_training', { method: 'POST' });
+                        const result = await response.json();
+                        addTrainingLog(`${result.success ? '✅' : '❌'} ${result.message}`);
+                    } catch (error) {
+                        addTrainingLog(`❌ 停止训练失败: ${error.message}`);
+                    }
+                });
+            }
+
+            // 置信度阈值滑块
+            if (elements.confThresholdInput) {
+                elements.confThresholdInput.addEventListener('input', function() {
+                    elements.confThresholdValue.textContent = this.value;
+                });
+            }
+
+            // 图像上传区域
+            if (elements.imageUploadArea) {
+                elements.imageUploadArea.addEventListener('click', function() {
+                    elements.imageInput.click();
+                });
+
+                elements.imageUploadArea.addEventListener('dragover', function(e) {
+                    e.preventDefault();
+                    this.classList.add('dragover');
+                });
+
+                elements.imageUploadArea.addEventListener('dragleave', function() {
+                    this.classList.remove('dragover');
+                });
+
+                elements.imageUploadArea.addEventListener('drop', function(e) {
+                    e.preventDefault();
+                    this.classList.remove('dragover');
+                    
+                    const files = e.dataTransfer.files;
+                    if (files.length > 0) {
+                        handleImageUpload(files[0]);
+                    }
+                });
+            }
+
+            if (elements.imageInput) {
+                elements.imageInput.addEventListener('change', function() {
+                    if (this.files.length > 0) {
+                        handleImageUpload(this.files[0]);
+                    }
+                });
+            }
+
+            // 推理按钮
+            if (elements.inferenceBtn) {
+                elements.inferenceBtn.addEventListener('click', performInference);
+            }
+
+            // 清空推理结果
+            if (elements.clearInferenceBtn) {
+                elements.clearInferenceBtn.addEventListener('click', clearInferenceResult);
+            }
+
+            // 模型对比按钮
+            if (elements.compareSelectedBtn) {
+                elements.compareSelectedBtn.addEventListener('click', compareSelectedModels);
+            }
+
+            // 模型导出按钮
+            if (elements.exportSelectedBtn) {
+                elements.exportSelectedBtn.addEventListener('click', function() {
+                    if (selectedRuns.size > 0) {
+                        window.open('/api/models/export', '_blank');
+                    }
+                });
+            }
+
+            // 初始化
+            initTrainingChart();
+            switchPage('overview');
+        });
+
+        function handleImageUpload(file) {
+            if (!file.type.startsWith('image/')) {
+                alert('请选择图像文件');
+                return;
+            }
+
+            currentUploadedImage = file;
+            
+            // 显示预览
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                elements.imageUploadArea.innerHTML = `
+                    <img src="${e.target.result}" style="max-width: 100%; max-height: 200px; border-radius: 8px;">
+                    <p style="margin-top: 10px; color: #2d3748;">已选择: ${file.name}</p>
+                `;
+            };
+            reader.readAsDataURL(file);
+            
+            elements.inferenceBtn.disabled = !elements.inferenceModelSelect.value;
+        }
+    </script>
+</body>
+</html> 

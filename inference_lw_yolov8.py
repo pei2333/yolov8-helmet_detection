@@ -55,7 +55,6 @@ try:
     THOP_AVAILABLE = True
 except ImportError:
     THOP_AVAILABLE = False
-    LOGGER.warning("thop未安装，无法计算FLOPs")
 
 
 class SafetyHelmetInferencer:
